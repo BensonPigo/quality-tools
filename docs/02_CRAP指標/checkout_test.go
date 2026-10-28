@@ -19,7 +19,7 @@ func TestCheckout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := Checkout(tt.items, tt.level, tt.coupon)
 			if got != tt.want {
-				t.Errorf("Checkout() = %d，規格要求 %d（借貸不平）", got, tt.want)
+				t.Errorf("Checkout() = %d，規格要求 %d（答錯了）", got, tt.want)
 			}
 		})
 	}
