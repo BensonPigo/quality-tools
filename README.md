@@ -191,7 +191,7 @@ python selftest.py --pack 暫存目錄/go go      # 存回 selftest/go.sample.tx
 
 | 項目 | 狀態 |
 |---|---|
-| `selftest.py` | 在本機（Windows + Git Bash + Python 3.12、Go 1.27、.NET SDK 10、Node 24）五個範例全部通過 |
+| `selftest.py` | 在本機（Windows + Git Bash + Python 3.12、Go 1.27、.NET SDK 10、Node 24）和 GitHub Actions 的 Linux 上，五個範例全部通過 |
 | 各語言模組 | 範例專案的 CRAP 表格：`Checkout` 的圈複雜度在 Go、C#、TypeScript、Python 範例都是 14（JavaScript + Jest 範例只有運費模組）；敘述覆蓋率在 Go、TypeScript、Python 都是 73.9%，C# 是行覆蓋率 60.5% |
 | 掛成 submodule 使用 | 在本機用 git 模擬過完整流程（見 `專案repo範本/README.md` 的驗證狀態） |
-| `.github/workflows/selftest.yml` | 還沒在 GitHub 或 Gitea 上跑過，也還沒在 Linux 上跑過 |
+| `.github/workflows/selftest.yml` | 在 GitHub Actions（ubuntu-latest）上五個範例全部通過，約 3 分鐘。還沒在 Gitea 上跑過 |
