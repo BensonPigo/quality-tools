@@ -1,0 +1,8 @@
+{
+  "language": "go",
+  "base": "origin/main",
+  "crap_threshold": 12,
+  "efficacy_threshold": 80,
+  "mutant_coverage_threshold": 0,
+  "exclude": ["tools/", "vendor/", "node_modules/"]
+}

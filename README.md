@@ -2,7 +2,7 @@
 
 三重約束裡 CRAP 和變異測試的量測工具，各專案 repo 用 git submodule 掛在 `tools/quality/`。單元測試由各 repo 自己寫，這個工具負責量測那些測試寫得夠不夠好。
 
-專案 repo 要怎麼掛上這個工具，見 `專案repo範本/README.md`。這份文件寫給維護工具的人。
+專案 repo 要怎麼掛上這個工具，見 `docs/範本_三道防線/專案repo範本/README.md`。這份文件寫給維護工具的人。
 
 ## 支援的語言
 
@@ -46,6 +46,11 @@ quality-tools/
 │                          #   <範例>.json        測試情境
 │                          #   <範例>.crap.txt    CRAP 表格的快照
 ├── .github/workflows/selftest.yml  # 每次推送和 PR 跑 selftest.py（GitHub 和 Gitea 都讀得到）
+├── docs/
+│   ├── 範本_三道防線/      # 專案 repo 要放的設定（.quality.json、.claude/、workflow、CLAUDE.md 片段）和套用步驟
+│   ├── 01_單元測試/、02_CRAP指標/、03_變異測試/   # 三重約束的課程和練習程式
+│   └── 企業級AI代理人品質驗證與自動化防線架構指南.md
+├── CLAUDE.md              # 這個 repo 的寫作規範
 └── CHANGELOG.md
 ```
 
@@ -75,7 +80,7 @@ python tools/quality/quality.py baseline                      # 量現況，寫�
 1. 開分支修改，送 PR。
 2. CI 跑 `selftest.py`，五個範例都要通過。本機要先跑的話，執行 `python selftest.py`，或只跑改到的語言，例如 `python selftest.py csharp`。五個範例都會跑變異測試，C# 和 Python 最慢。
 3. 合併後，在 `CHANGELOG.md` 寫下這版改了什麼、會不會讓原本通過的專案變成沒過，再打版本標籤。
-4. 通知各專案 repo。各 repo 自己決定什麼時候升級，步驟見 `專案repo範本/README.md`。
+4. 通知各專案 repo。各 repo 自己決定什麼時候升級，步驟見 `docs/範本_三道防線/專案repo範本/README.md`。
 
 版本號的規則：
 
@@ -193,5 +198,5 @@ python selftest.py --pack 暫存目錄/go go      # 存回 selftest/go.sample.tx
 |---|---|
 | `selftest.py` | 在本機（Windows + Git Bash + Python 3.12、Go 1.27、.NET SDK 10、Node 24）和 GitHub Actions 的 Linux 上，五個範例全部通過 |
 | 各語言模組 | 範例專案的 CRAP 表格：`Checkout` 的圈複雜度在 Go、C#、TypeScript、Python 範例都是 14（JavaScript + Jest 範例只有運費模組）；敘述覆蓋率在 Go、TypeScript、Python 都是 73.9%，C# 是行覆蓋率 60.5% |
-| 掛成 submodule 使用 | 在本機用 git 模擬過完整流程（見 `專案repo範本/README.md` 的驗證狀態） |
+| 掛成 submodule 使用 | 在本機用 git 模擬過完整流程（見 `docs/範本_三道防線/專案repo範本/README.md` 的驗證狀態） |
 | `.github/workflows/selftest.yml` | 在 GitHub Actions（ubuntu-latest）上五個範例全部通過，約 3 分鐘。還沒在 Gitea 上跑過 |
