@@ -1,0 +1,9 @@
+CRAP     C      Cover    Func                     Pos
+30.0     5      0.0%     weight                   shop/shipping/fee.py:10 ❌
+17.5     14     73.9%    checkout                 shop/checkout.py:19 ❌
+6.0      2      0.0%     Box.label                shop/shipping/fee.py:27   
+4.9      3      40.0%    fee                      shop/shipping/fee.py:1   
+2.0      1      0.0%     add                      shop/notest/calc.py:1   
+2.0      1      0.0%     Box.__init__             shop/shipping/fee.py:24   
+
+FAIL：2 個函式的 CRAP 超過門檻 12

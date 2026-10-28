@@ -1,0 +1,34 @@
+# 工具本身的回歸測試：每次推送和 PR 都用 selftest/ 的五個範例專案跑一遍 selftest.py。
+# 沒過的 PR 不能合併，也不能打新版本標籤。GitHub 讀 .github/workflows/；Gitea 在沒有 .gitea/workflows/ 時也會讀這裡，搬到 Gitea 不用移動。
+name: 工具回歸測試
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27" # 跟 Go 範例的 go.mod 一致
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x # 跟 C# 範例的 global.json 一致
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # StrykerJS 10 需要 Node 22 以上
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 用範例專案跑回歸測試
+        run: python selftest.py

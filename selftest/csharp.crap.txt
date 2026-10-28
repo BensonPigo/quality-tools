@@ -1,0 +1,8 @@
+CRAP     C      Cover    Func                     Pos
+30.0     5      0.0%     Fees.Weight              src/Shop/Shipping/Fee.cs:20 ❌
+26.1     14     60.5%    Cart.Checkout            src/Shop/Checkout.cs:10 ❌
+3.8      3      55.6%    Fees.Fee                 src/Shop/Shipping/Fee.cs:6   
+2.0      1      0.0%     Calc.Add                 src/NoTest/Calc.cs:5   
+2.0      1      0.0%     Fees.Double              src/Shop/Shipping/Fee.cs:41   
+
+FAIL：2 個函式的 CRAP 超過門檻 12

@@ -1,0 +1,120 @@
+{
+  "setup": [
+    [
+      "{python}",
+      "-m",
+      "venv",
+      ".venv"
+    ],
+    [
+      "{venv_python}",
+      "-m",
+      "pip",
+      "install",
+      "-q",
+      "-r",
+      "requirements-dev.txt"
+    ]
+  ],
+  "scenarios": [
+    {
+      "name": "沒改東西：CRAP 通過",
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 0,
+      "contains": [
+        "PASS：這次沒有改到任何函式"
+      ]
+    },
+    {
+      "name": "沒改東西：變異測試通過",
+      "run": [
+        "mutation",
+        "--base",
+        "main"
+      ],
+      "exit": 0,
+      "contains": [
+        "PASS：這次沒有改到正式程式碼"
+      ]
+    },
+    {
+      "name": "改到沒有測試的舊函式 weight：CRAP 沒過，要補測試",
+      "edits": [
+        {
+          "file": "shop/shipping/fee.py",
+          "old": "return 50",
+          "new": "return 55"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 1,
+      "contains": [
+        "覆蓋率要到 35%",
+        "FAIL：1 個函式"
+      ]
+    },
+    {
+      "name": "fee 的免運門檻改成 999：只測了 1000 元，邊界的突變體存活，效能門檻 100 時沒過",
+      "edits": [
+        {
+          "file": "shop/shipping/fee.py",
+          "old": "if total >= 1000:",
+          "new": "if total >= 999:"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"efficacy_threshold\": 80",
+          "new": "\"efficacy_threshold\": 100"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main"
+      ],
+      "exit": 1,
+      "contains": [
+        "LIVED",
+        "FAIL："
+      ]
+    },
+    {
+      "name": "測試失敗：test 回傳 1",
+      "edits": [
+        {
+          "file": "tests/test_checkout.py",
+          "old": "assert fee(1000, \"本島\") == 0",
+          "new": "assert fee(1000, \"本島\") == 5"
+        }
+      ],
+      "run": [
+        "test"
+      ],
+      "exit": 1
+    },
+    {
+      "name": "測試失敗：crap 回傳 2",
+      "edits": [
+        {
+          "file": "tests/test_checkout.py",
+          "old": "assert fee(1000, \"本島\") == 0",
+          "new": "assert fee(1000, \"本島\") == 5"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 2
+    }
+  ]
+}

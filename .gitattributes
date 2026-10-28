@@ -1,0 +1,2 @@
+# 一律用 LF 存放。Windows 上設了 core.autocrlf 時，範例打包檔和 shell 腳本換成 CRLF 會出問題
+* text=auto eol=lf

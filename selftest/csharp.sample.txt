@@ -1,0 +1,207 @@
+# 範例專案 csharp。不要直接編輯，用 python selftest.py --unpack csharp <目錄> 解開，改完用 --pack 存回
+--- file: .gitignore
+bin/
+obj/
+
+--- file: .quality.json
+{
+  "language": "csharp",
+  "base": "origin/main",
+  "crap_threshold": 12,
+  "efficacy_threshold": 80,
+  "mutant_coverage_threshold": 0,
+  "exclude": ["tools/", "vendor/", "node_modules/"]
+}
+
+--- file: Shop.slnx
+<Solution>
+  <Project Path="src/NoTest/NoTest.csproj" />
+  <Project Path="src/Shop/Shop.csproj" />
+  <Project Path="tests/Shop.Tests/Shop.Tests.csproj" />
+</Solution>
+
+--- file: global.json
+{ "sdk": { "version": "10.0.101", "rollForward": "latestPatch" } }
+
+--- file: src/NoTest/Calc.cs
+namespace NoTest;
+
+public static class Calc
+{
+    public static int Add(int a, int b)
+    {
+        return a + b;
+    }
+}
+
+--- file: src/NoTest/NoTest.csproj
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
+
+--- file: src/Shop/Checkout.cs
+namespace Shop;
+
+public enum MemberLevel { NonMember, Member, VIP }
+
+public record Item(int Price, int Qty, bool OnSale);
+
+public static class Cart
+{
+    // 故意寫亂的函式：所有規則都塞在同一個函式裡。
+    public static int Checkout(IReadOnlyList<Item> items, MemberLevel level, string coupon)
+    {
+        if (items.Count == 0)
+        {
+            return 0;
+        }
+
+        var total = 0;
+        foreach (var it in items)
+        {
+            if (it.Qty <= 0)
+            {
+                continue;
+            }
+            var line = it.Price * it.Qty;
+            if (!it.OnSale)
+            {
+                if (level == MemberLevel.Member)
+                {
+                    line = line * 90 / 100;
+                }
+                else if (level == MemberLevel.VIP)
+                {
+                    line = line * 85 / 100;
+                }
+            }
+            total += line;
+        }
+
+        if (coupon == "SAVE100" && total >= 1000)
+        {
+            total -= 100;
+        }
+        if (total >= 3000)
+        {
+            total -= 300;
+        }
+
+        var shipping = 0;
+        if (total < 1000 && level != MemberLevel.VIP && coupon != "FREESHIP")
+        {
+            shipping = 100;
+            if (coupon == "HALFSHIP")
+            {
+                shipping = 50;
+            }
+        }
+        return total + shipping;
+    }
+}
+
+--- file: src/Shop/Shop.csproj
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
+
+--- file: src/Shop/Shipping/Fee.cs
+namespace Shop.Shipping;
+
+public static class Fees
+{
+    // 依金額和地區算運費。
+    public static int Fee(int total, string region)
+    {
+        if (total >= 1000)
+        {
+            return 0;
+        }
+        if (region == "離島")
+        {
+            return 150;
+        }
+        return 60;
+    }
+
+    // 依重量加價。
+    public static int Weight(int kg)
+    {
+        if (kg > 20)
+        {
+            return 200;
+        }
+        if (kg > 10)
+        {
+            return 100;
+        }
+        if (kg > 5)
+        {
+            return 50;
+        }
+        if (kg > 2)
+        {
+            return 20;
+        }
+        return 0;
+    }
+
+    public static int Double(int x) => x * 2;
+}
+
+--- file: tests/Shop.Tests/CartTests.cs
+using Shop;
+using Shop.Shipping;
+
+public class CartTests
+{
+    // 每個正確答案都是依照需求規格親手算出的寫死數字。
+    [Fact]
+    public void 空購物車() => Assert.Equal(0, Cart.Checkout(new List<Item>(), MemberLevel.NonMember, ""));
+
+    [Fact]
+    public void 非會員_500元_加運費100() =>
+        Assert.Equal(600, Cart.Checkout(new List<Item> { new(500, 1, false) }, MemberLevel.NonMember, ""));
+
+    [Fact]
+    public void 滿千免運() => Assert.Equal(0, Fees.Fee(1000, "本島"));
+}
+
+--- file: tests/Shop.Tests/Shop.Tests.csproj
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Shop\Shop.csproj" />
+  </ItemGroup>
+
+</Project>

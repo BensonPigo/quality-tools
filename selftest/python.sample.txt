@@ -1,0 +1,130 @@
+# 範例專案 python。不要直接編輯，用 python selftest.py --unpack python <目錄> 解開，改完用 --pack 存回
+--- file: .gitignore
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+
+--- file: .quality.json
+{
+  "language": "python",
+  "base": "origin/main",
+  "crap_threshold": 12,
+  "efficacy_threshold": 80,
+  "mutant_coverage_threshold": 0,
+  "exclude": ["tools/", "vendor/", "node_modules/"]
+}
+
+--- file: pyproject.toml
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+--- file: requirements-dev.txt
+pytest==9.1.1
+coverage==7.16.2
+cosmic-ray==8.7.0
+
+--- file: shop/__init__.py
+
+--- file: shop/checkout.py
+"""購物車結帳。"""
+from dataclasses import dataclass
+from enum import Enum
+
+
+class MemberLevel(Enum):
+    NON_MEMBER = 0
+    MEMBER = 1
+    VIP = 2
+
+
+@dataclass
+class Item:
+    price: int
+    qty: int
+    on_sale: bool
+
+
+def checkout(items, level, coupon):
+    """故意寫亂的函式：所有規則都塞在同一個函式裡。"""
+    if len(items) == 0:
+        return 0
+
+    total = 0
+    for it in items:
+        if it.qty <= 0:
+            continue
+        line = it.price * it.qty
+        if not it.on_sale:
+            if level == MemberLevel.MEMBER:
+                line = line * 90 // 100
+            elif level == MemberLevel.VIP:
+                line = line * 85 // 100
+        total += line
+
+    if coupon == "SAVE100" and total >= 1000:
+        total -= 100
+    if total >= 3000:
+        total -= 300
+
+    shipping = 0
+    if total < 1000 and level != MemberLevel.VIP and coupon != "FREESHIP":
+        shipping = 100
+        if coupon == "HALFSHIP":
+            shipping = 50
+    return total + shipping
+
+--- file: shop/notest/__init__.py
+
+--- file: shop/notest/calc.py
+def add(a, b):
+    return a + b
+
+--- file: shop/shipping/__init__.py
+
+--- file: shop/shipping/fee.py
+def fee(total, region):
+    """依金額和地區算運費。"""
+    if total >= 1000:
+        return 0
+    if region == "離島":
+        return 150
+    return 60
+
+
+def weight(kg):
+    """依重量加價。"""
+    if kg > 20:
+        return 200
+    if kg > 10:
+        return 100
+    if kg > 5:
+        return 50
+    if kg > 2:
+        return 20
+    return 0
+
+
+class Box:
+    def __init__(self, size):
+        self.size = size
+
+    def label(self):
+        return "大" if self.size > 10 else "小"
+
+--- file: tests/test_checkout.py
+from shop.checkout import Item, MemberLevel, checkout
+from shop.shipping.fee import fee
+
+
+# 每個正確答案都是依照需求規格親手算出的寫死數字。
+def test_空購物車():
+    assert checkout([], MemberLevel.NON_MEMBER, "") == 0
+
+
+def test_非會員_500元_加運費100():
+    assert checkout([Item(500, 1, False)], MemberLevel.NON_MEMBER, "") == 600
+
+
+def test_滿千免運():
+    assert fee(1000, "本島") == 0

@@ -1,0 +1,9 @@
+CRAP     C      Cover    Func                     Pos
+30.0     5      0.0%     weight                   src/shipping/fee.ts:13 ❌
+17.5     14     73.9%    checkout                 src/checkout.ts:6 ❌
+6.0      2      0.0%     Box.label                src/shipping/fee.ts:32   
+4.9      3      40.0%    fee                      src/shipping/fee.ts:2   
+2.0      1      0.0%     add                      src/notest/calc.ts:1   
+2.0      1      0.0%     Box.constructor          src/shipping/fee.ts:30   
+
+FAIL：2 個函式的 CRAP 超過門檻 12

@@ -1,0 +1,5 @@
+CRAP     C      Cover    Func                     Pos
+12.0     3      0.0%     weight                   lib/shipping/fee.js:13   
+4.9      3      40.0%    fee                      lib/shipping/fee.js:2   
+
+PASS：所有函式的 CRAP 都在門檻 12 以內
