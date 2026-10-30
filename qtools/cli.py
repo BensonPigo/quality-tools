@@ -5,11 +5,13 @@
     python tools/quality/quality.py test                          # 第一關：單元測試
     python tools/quality/quality.py crap --base origin/main       # 第二關：只檢查改到的函式
     python tools/quality/quality.py mutation --base origin/main   # 第三關：抓錯檢查，只計算改到的行
+    python tools/quality/quality.py check --base origin/main      # 依 gates 依序跑，第一個沒過就停
     python tools/quality/quality.py baseline                      # 量現況，寫成 docs/品質現況.md
     python tools/quality/quality.py migrate                       # v1 的 .quality.json 轉成 v2
 
 crap 和 mutation 不加 --base 時，檢查整個專案；加 --json 檔名，另外寫一份 JSON 報告。
-門檻、語言、排除目錄寫在專案根目錄的 .quality.json。
+門檻、語言、排除目錄、啟用哪幾關（gates）寫在專案根目錄的 .quality.json。
+單獨執行的那一關不在 gates 裡，會印「還沒啟用」並以結束碼 0 結束。
 
 結束碼：0 通過，1 沒過門檻，2 量測失敗或設定有誤（例如測試沒過、工具執行失敗）。
 """
@@ -38,6 +40,10 @@ def main(argv=None):
     p = sub.add_parser("mutation", help="第三關：抓錯檢查")
     p.add_argument("--base", help="只計算和這個分支相比有改到的行，例如 origin/main")
     p.add_argument("--json", metavar="檔名", help="另外寫一份 JSON 報告")
+    p = sub.add_parser("check", help="依 gates 依序跑，第一個沒過就停")
+    p.add_argument("--base", help="比較基準，沒給就用 .quality.json 的 base")
+    p.add_argument("--skip", nargs="+", default=[], metavar="名稱", help="這次不跑的關：{}".format("、".join(config.GATES)))
+    p.add_argument("--json", metavar="目錄", help="crap 和 mutation 兩關各寫一份 JSON 報告到這個目錄")
     p = sub.add_parser("baseline", help="量現況")
     p.add_argument("--out", help="報告檔名，預設用設定檔的 baseline.out")
     sub.add_parser("migrate", help="把 v1 的 .quality.json 轉成 v2")
@@ -51,22 +57,43 @@ def main(argv=None):
             sys.exit(cmd_migrate())
         cfg = config.load_config()
         lang = load_language(cfg["language"])
-        command = {"test": cmd_test, "crap": cmd_crap, "mutation": cmd_mutation, "baseline": cmd_baseline}
+        command = {"test": cmd_test, "crap": cmd_crap, "mutation": cmd_mutation, "check": cmd_check,
+                   "baseline": cmd_baseline}
         sys.exit(command[args.command](args, cfg, lang))
     except QualityError as e:
         print(e, file=sys.stderr)
         sys.exit(e.exit_code)
 
 
+# ---------- 關卡 ----------
+
+def not_enabled(gate, args, cfg, lang):
+    """單獨執行的那一關不在 gates 裡：印「還沒啟用」，有 --json 就寫 result 為 skipped 的報告。
+
+    回傳 True 代表這一關沒啟用，呼叫的指令直接以結束碼 0 結束，不跑任何量測。
+    """
+    if gate in cfg["gates"]:
+        return False
+    print("第 {} 關（{}）還沒啟用：{} 的 gates 沒有 {}".format(config.GATES.index(gate) + 1, gate, config.CONFIG_FILE, gate))
+    if getattr(args, "json", None):
+        report.write_json(args.json, report.build_report(
+            gate, cfg, lang, args.base, _commit(), True, skipped=True))
+    return True
+
+
 # ---------- 第一關：單元測試 ----------
 
 def cmd_test(args, cfg, lang):
+    if not_enabled("test", args, cfg, lang):
+        return 0
     return 0 if lang.run_tests(cfg) == 0 else 1
 
 
 # ---------- 第二關：CRAP ----------
 
 def cmd_crap(args, cfg, lang):
+    if not_enabled("crap", args, cfg, lang):
+        return 0
     threshold = cfg["crap"]["threshold"]
     funcs = crap.score_functions(lang.measure_functions(cfg))
 
@@ -100,6 +127,8 @@ def cmd_crap(args, cfg, lang):
 # ---------- 第三關：抓錯檢查 ----------
 
 def cmd_mutation(args, cfg, lang):
+    if not_enabled("mutation", args, cfg, lang):
+        return 0
     entries = equivalents.load(cfg["mutation"]["equivalents_file"])
     settings = lang.settings(cfg)
     if args.base:
@@ -151,6 +180,47 @@ def _finish_mutation(args, cfg, lang, settings, mutants, problems, unused=()):
             "mutation", cfg, lang, args.base, _commit(), not problems,
             mutation_part=report.mutation_json(mutants, counts, cfg, lang.report_group, settings, unused)))
     return 1 if problems else 0
+
+
+# ---------- check：依序跑已啟用的關 ----------
+
+def plan_gates(gates, skip):
+    """回傳 (要跑的關, 略過的關, 還沒啟用的關)。順序固定是 test → crap → mutation，跟 gates 裡的排列無關。
+
+    --skip 給了不認得的名稱，丟 QualityError（結束碼 2）。
+    """
+    bad = [s for s in skip if s not in config.GATES]
+    if bad:
+        raise QualityError("--skip 不認得的關：{}（可用：{}）".format("、".join(bad), "、".join(config.GATES)))
+    ordered = [g for g in config.GATES if g in gates]
+    run = [g for g in ordered if g not in skip]
+    return run, [g for g in ordered if g in skip], [g for g in config.GATES if g not in gates]
+
+
+def cmd_check(args, cfg, lang):
+    run, skipped, disabled = plan_gates(cfg["gates"], args.skip)
+    base = args.base or cfg["base"]
+    print("比較基準：" + base)
+    gate_cmds = {"test": cmd_test, "crap": cmd_crap, "mutation": cmd_mutation}
+    if args.json:
+        os.makedirs(args.json, exist_ok=True)
+    for gate in run:
+        n = config.GATES.index(gate) + 1
+        print("== 第 {} 關：{} ==".format(n, gate), flush=True)
+        # test 沒有 JSON 報告；沒跑到的關不寫檔
+        json_path = os.path.join(args.json, gate + ".json") if args.json and gate != "test" else None
+        try:
+            code = gate_cmds[gate](argparse.Namespace(base=base, json=json_path), cfg, lang)
+        except QualityError as e:
+            sys.stdout.flush()  # stdout 和 stderr 接到同一條管線時，前面的輸出要先出去，順序才對
+            print(e, file=sys.stderr, flush=True)
+            code = e.exit_code
+        if code != 0:
+            print("\n停在第 {} 關".format(n))
+            return code
+    print("\nPASS：已啟用的 {} 關都通過（略過：{}；還沒啟用：{}）".format(
+        len(run), "、".join(skipped) or "無", "、".join(disabled) or "無"))
+    return 0
 
 
 # ---------- 量現況 ----------

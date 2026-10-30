@@ -103,7 +103,8 @@ def mutation_json(mutants, counts, cfg, group, settings, unused=()):
 
 # ---------- JSON 報告 ----------
 
-def build_report(command, cfg, lang, base, commit, passed, crap_part=None, mutation_part=None):
+def build_report(command, cfg, lang, base, commit, passed, crap_part=None, mutation_part=None, skipped=False):
+    """skipped 為 True 代表該關沒啟用，result 寫 skipped，crap 和 mutation 都是 null。"""
     return {
         "schema": SCHEMA_VERSION,
         "command": command,
@@ -111,7 +112,7 @@ def build_report(command, cfg, lang, base, commit, passed, crap_part=None, mutat
         "language": cfg["language"],
         "base": base,
         "commit": commit,
-        "result": "pass" if passed else "fail",
+        "result": "skipped" if skipped else "pass" if passed else "fail",
         "tools": dict(lang.tools),
         "crap": crap_part,
         "mutation": mutation_part,

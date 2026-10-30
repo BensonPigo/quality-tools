@@ -58,7 +58,7 @@ REPORT = {
     "language": str,
     "base": Opt(str),
     "commit": str,
-    "result": Enum("pass", "fail"),
+    "result": Enum("pass", "fail", "skipped"),
     "tools": Dic(str),
     "crap": Opt({
         "threshold": Num,
@@ -86,12 +86,16 @@ def validate(data):
     errors = []
     _check(data, REPORT, "$", errors)
     if isinstance(data, dict) and not errors:
-        # crap 指令的 mutation 是 null，mutation 指令的 crap 是 null，baseline 兩者都有
+        # crap 指令的 mutation 是 null，mutation 指令的 crap 是 null，baseline 兩者都有；
+        # result 是 skipped（該關沒啟用）時兩者都是 null
         want = {"crap": (True, False), "mutation": (False, True), "baseline": (True, True)}[data["command"]]
+        if data["result"] == "skipped":
+            want = (False, False)
         have = (data["crap"] is not None, data["mutation"] is not None)
         if have != want:
-            errors.append("$：command 是 {} 時，crap 和 mutation 要{}有值".format(
-                data["command"], "、".join(n for n, w in zip(("crap", "mutation"), want) if w) or "都沒"))
+            when = "result 是 skipped" if data["result"] == "skipped" else "command 是 " + data["command"]
+            errors.append("$：{} 時，crap 和 mutation 要{}有值".format(
+                when, "、".join(n for n, w in zip(("crap", "mutation"), want) if w) or "都沒"))
     return errors
 
 

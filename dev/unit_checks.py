@@ -14,10 +14,11 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from qtools import config, crap, equivalents, mutation, report, report_schema  # noqa: E402
+from qtools import cli, config, crap, equivalents, mutation, report, report_schema  # noqa: E402
 from qtools.langs import base, csharp, go, js, python  # noqa: E402
 from qtools.model import Function, Mutant  # noqa: E402
 from qtools.proc import QualityError  # noqa: E402
@@ -279,9 +280,71 @@ class SchemaChecks(unittest.TestCase):
         data["mutation"]["settings"] = {"timeout_seconds": 60.5, "workers": 2, "exclude_mutators": ["A"]}
         self.assertEqual(report_schema.validate(data), [])
 
+    def test_result_skipped_needs_both_parts_null(self):
+        data = self.sample("crap")
+        data["result"] = "skipped"
+        self.assertTrue(any("skipped" in e for e in report_schema.validate(data)))  # crap 不是 null
+        data = self.sample("mutation")
+        data["result"] = "skipped"
+        self.assertTrue(report_schema.validate(data))  # mutation 不是 null
+        data["mutation"] = None
+        self.assertEqual(report_schema.validate(data), [])  # 兩者都 null 才合格
+
+    def test_pass_and_fail_still_follow_command(self):
+        for result in ("pass", "fail"):
+            data = self.sample("crap")
+            data["result"] = result
+            data["crap"] = None  # crap 指令 crap 是 null：不合格
+            self.assertTrue(report_schema.validate(data), result)
+            data = self.sample("mutation")
+            data["result"] = result
+            data["mutation"] = None
+            self.assertTrue(report_schema.validate(data), result)
+
+    def test_build_report_skipped(self):
+        cfg = config.validate({"version": 2, "language": "go"})
+        data = report.build_report("crap", cfg, go.LANGUAGE(), "main", "abc", True, skipped=True)
+        self.assertEqual((data["result"], data["crap"], data["mutation"]), ("skipped", None, None))
+        self.assertEqual(report_schema.validate(data), [])
+
     def test_nullable_fields_accept_null(self):
         data = self.sample("mutation")
         self.assertIsNone(data["mutation"]["mutants"][1]["column"])
+        self.assertEqual(report_schema.validate(data), [])
+
+
+class GateChecks(unittest.TestCase):
+    def test_order_is_fixed_regardless_of_gates_order(self):
+        self.assertEqual(cli.plan_gates(["mutation", "test"], [])[0], ["test", "mutation"])
+        self.assertEqual(cli.plan_gates(["mutation", "crap", "test"], [])[0], ["test", "crap", "mutation"])
+
+    def test_classification_run_skipped_disabled(self):
+        self.assertEqual(cli.plan_gates(["test", "crap", "mutation"], ["mutation"]),
+                         (["test", "crap"], ["mutation"], []))
+        self.assertEqual(cli.plan_gates(["mutation", "test"], []), (["test", "mutation"], [], ["crap"]))
+        # 沒啟用的關就算 --skip 也列在「還沒啟用」，不重複算進略過
+        self.assertEqual(cli.plan_gates(["test"], ["crap"]), (["test"], [], ["crap", "mutation"]))
+        self.assertEqual(cli.plan_gates(["test", "crap"], ["test", "crap"]), ([], ["test", "crap"], ["mutation"]))
+
+    def test_unknown_skip_name_is_exit_2(self):
+        with self.assertRaises(QualityError) as ctx:
+            cli.plan_gates(["test"], ["foo"])
+        self.assertEqual(ctx.exception.exit_code, 2)
+        self.assertIn("foo", str(ctx.exception))
+
+    def test_not_enabled_message_and_skipped_json(self):
+        cfg = config.validate({"version": 2, "language": "go", "gates": ["test"]})
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "r.json")
+            args = type("A", (), {"base": "main", "json": path})()
+            with contextlib.redirect_stdout(out), mock.patch.object(cli, "_commit", lambda: "abc"):
+                self.assertTrue(cli.not_enabled("crap", args, cfg, go.LANGUAGE()))
+                self.assertFalse(cli.not_enabled("test", args, cfg, go.LANGUAGE()))
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        self.assertIn("第 2 關（crap）還沒啟用：.quality.json 的 gates 沒有 crap", out.getvalue())
+        self.assertEqual(data["result"], "skipped")
         self.assertEqual(report_schema.validate(data), [])
 
 

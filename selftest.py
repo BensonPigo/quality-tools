@@ -22,11 +22,17 @@
 所有情境都在這個狀態下跑。selftest.py 一開始會先跑 dev/unit_checks.py（不需要語言工具的純函式測試），沒過就整體失敗。
 
 情境（scenarios）可以用 run + exit + contains 寫單一步驟，也可以用 steps 寫多個步驟。每一步是
-{run, exit, contains, not_contains, json, json_values, no_files}：同一個情境的各步之間不還原工作目錄；
-exit 可以是一個數字，也可以是可接受的數字串列（例如 [0, 1]）；json 是該步 --json 寫出的檔名，
+{run, exit, contains, in_order, not_contains, json, json_values, no_files}：同一個情境的各步之間不還原工作目錄；
+exit 可以是一個數字，也可以是可接受的數字串列（例如 [0, 1]）；in_order 是要依序出現的文字串列；
+json 是該步 --json 寫出的檔名（也可以是檔名串列），
 讀檔後用 qtools.report_schema.validate 比對，不符就算該步失敗；json_values 是 {"欄位.路徑": 預期值}，
 比對 json 檔裡對應欄位的值；no_files 是檔名樣式（fnmatch）的串列，這一步結束後範例專案裡不能有符合的檔案。
 run 的第一個元素是 {venv_python} 時，直接執行範例 venv 的 Python，不經過 quality.py。
+
+步驟可以用 "shell": [指令...] 取代 run，直接執行任意指令（不經過殼層），cwd 是範例專案，stdin 給 {}，
+環境變數加 CLAUDE_PROJECT_DIR=<範例專案>（QUALITY_BASE 會先清掉，免得外面的設定干擾），
+步驟另外用 "env": {名稱: 值} 加環境變數。指令的每個元素裡，{gate_sh} 換成範本 gate.sh 的絕對路徑，
+{bash} 換成 bash：Windows 用 Git for Windows 的 bash.exe（不用 System32 底下 WSL 的 bash），找不到該步就失敗。
 
 範例專案需要的語言工具（Go、.NET SDK、Node、Python）要先裝好。
 """
@@ -42,6 +48,7 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+GATE_SH = os.path.join(HERE, "docs", "範本_三道防線", "專案repo範本", ".claude", "hooks", "gate.sh")
 CASES = os.path.join(HERE, "selftest")
 UNIT_CHECKS = os.path.join(HERE, "dev", "unit_checks.py")
 FILE_MARK = "--- file: "  # 打包檔裡每個檔案的開頭
@@ -138,9 +145,9 @@ def run_sample(name, args):
                 steps = sc.get("steps") or [sc]
                 for i, step in enumerate(steps, 1):
                     title = sc["name"] if len(steps) == 1 else "{}（步驟 {}）".format(sc["name"], i)
-                    failed += check(title, proj, step["run"], step["exit"], step.get("contains", []),
+                    failed += check(title, proj, step.get("run"), step["exit"], step.get("contains", []),
                                     step.get("not_contains", []), step.get("json"), step.get("json_values"),
-                                    step.get("no_files") or ())
+                                    step.get("no_files") or (), step.get("shell"), step.get("env"), step.get("in_order", []))
     finally:
         if args.keep:
             print("  暫存目錄：" + proj)
@@ -239,8 +246,11 @@ def crap_table(stdout):
     return "".join(lines[start:])
 
 
-def check(title, proj, cmd, code, contains=(), not_contains=(), json_file=None, json_values=None, no_files=()):
-    if cmd and cmd[0] == "{venv_python}":
+def check(title, proj, cmd, code, contains=(), not_contains=(), json_file=None, json_values=None, no_files=(),
+          shell=None, env=None, in_order=()):
+    if shell is not None:
+        r = run_shell(proj, shell, env or {})
+    elif cmd and cmd[0] == "{venv_python}":
         r = run([os.path.join(proj, VENV_PYTHON)] + cmd[1:], proj)
     else:
         r = quality(proj, cmd)
@@ -255,8 +265,15 @@ def check(title, proj, cmd, code, contains=(), not_contains=(), json_file=None, 
         problems.append("輸出缺少：" + "、".join(missing))
     if unexpected:
         problems.append("輸出不該出現：" + "、".join(unexpected))
-    if json_file:
-        problems += _json_problems(os.path.join(proj, json_file), json_file, json_values or {})
+    pos = 0
+    for c in in_order:
+        found = output.find(c, pos)
+        if found < 0:
+            problems.append("輸出沒有依序出現：" + "、".join(in_order))
+            break
+        pos = found + len(c)
+    for name in [json_file] if isinstance(json_file, str) else json_file or ():
+        problems += _json_problems(os.path.join(proj, name), name, json_values or {})
     problems += _leftover_files(proj, no_files)
     return report(title, r, not problems, "；".join(problems))
 
@@ -296,6 +313,49 @@ def report(title, r, ok, detail):
     print("     " + detail.replace("\n", "\n     "))
     print("     實際輸出：\n     " + (r.stdout + r.stderr)[-3000:].replace("\n", "\n     "))
     return [title]
+
+
+def find_bash():
+    """找 bash 的路徑，找不到回傳 None。
+
+    Windows 上 PATH 裡的 bash 可能是 System32 底下的 WSL 啟動器，跑起來是另一個 Linux 環境，
+    gate.sh 在那裡找不到 Git Bash 的工具。所以先從 git 的安裝目錄找（git --exec-path 在
+    <安裝目錄>/mingw64/libexec/git-core，往上三層是安裝目錄，bash.exe 在 bin/ 底下），
+    找不到才用 PATH 裡的 bash，而且要略過 System32 和 WindowsApps。
+    """
+    if os.name != "nt":
+        return shutil.which("bash")
+    candidates = []
+    r = run(["git", "--exec-path"], HERE)
+    if r.returncode == 0:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.normpath(r.stdout.strip()))))
+        candidates += [os.path.join(root, "bin", "bash.exe"), os.path.join(root, "usr", "bin", "bash.exe")]
+    candidates.append(shutil.which("bash"))
+    for c in candidates:
+        if c and os.path.isfile(c) and not any(
+                bad in c.replace("/", "\\").lower() for bad in ("\\windows\\system32\\", "\\windowsapps\\")):
+            return c
+    return None
+
+
+def run_shell(proj, cmd, extra_env):
+    """執行 shell 步驟：換掉 {gate_sh}、{bash}，cwd 是範例專案，stdin 給 {}。"""
+    bash = None
+    if any("{bash}" in c for c in cmd):
+        bash = find_bash()
+        if not bash:
+            return subprocess.CompletedProcess(cmd, 2, "", "找不到 Git Bash 的 bash（Windows 上不能用 System32 底下 WSL 的 bash），"
+                                                          "請安裝 Git for Windows")
+    gate_sh = GATE_SH.replace("\\", "/")
+    cmd = [c.replace("{bash}", bash or "").replace("{gate_sh}", gate_sh) for c in cmd]
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1", CLAUDE_PROJECT_DIR=proj.replace("\\", "/"))
+    env.pop("QUALITY_BASE", None)
+    env.update(extra_env)
+    r = subprocess.run(cmd, cwd=proj, env=env, input="{}", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       encoding="utf-8", errors="replace")
+    r.stdout = r.stdout.replace("\r\n", "\n")
+    r.stderr = r.stderr.replace("\r\n", "\n")
+    return r
 
 
 def quality(proj, cmd):
