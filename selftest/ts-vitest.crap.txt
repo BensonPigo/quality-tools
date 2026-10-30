@@ -1,4 +1,4 @@
-CRAP     C      Cover    Func                     Pos
+CRAP     C      覆蓋率      函式                       位置
 30.0     5      0.0%     weight                   src/shipping/fee.ts:13 ❌
 17.5     14     73.9%    checkout                 src/checkout.ts:6 ❌
 6.0      2      0.0%     Box.label                src/shipping/fee.ts:32   

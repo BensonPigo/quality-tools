@@ -64,7 +64,7 @@
       ]
     },
     {
-      "name": "fee 的免運門檻改成 999：只測了 1000 元，邊界的突變體存活，效能門檻 100 時沒過",
+      "name": "fee 的免運門檻改成 999：只測了 1000 元，邊界的改壞版本沒抓到，抓錯率門檻 100 時沒過",
       "edits": [
         {
           "file": "shipping/fee.go",
@@ -73,8 +73,8 @@
         },
         {
           "file": ".quality.json",
-          "old": "\"efficacy_threshold\": 80",
-          "new": "\"efficacy_threshold\": 100"
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100"
         }
       ],
       "run": [
@@ -84,7 +84,7 @@
       ],
       "exit": 1,
       "contains": [
-        "LIVED",
+        "沒抓到",
         "FAIL："
       ]
     },
@@ -135,6 +135,114 @@
       "contains": [
         "共 1 個",
         "Sub"
+      ]
+    },
+    {
+      "name": "v1 格式的設定檔：結束碼 2，提示執行 migrate",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "content": "{\n  \"language\": \"go\",\n  \"base\": \"origin/main\",\n  \"crap_threshold\": 12,\n  \"efficacy_threshold\": 80,\n  \"mutant_coverage_threshold\": 0,\n  \"exclude\": [\"tools/\", \"vendor/\", \"node_modules/\"]\n}\n"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "migrate"
+      ]
+    },
+    {
+      "name": "設定檔有打錯字的鍵：結束碼 2，不會默默變成預設值",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"version\": 2,",
+          "new": "\"version\": 2,\n  \"gate\": [\"test\"],"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "不認得的鍵：gate"
+      ]
+    },
+    {
+      "name": "--json 輸出符合格式：crap 和 mutation 各一份",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "crap",
+            "--base",
+            "main",
+            "--json",
+            "out-crap.json"
+          ],
+          "exit": 0,
+          "json": "out-crap.json"
+        },
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main",
+            "--json",
+            "out-mut.json"
+          ],
+          "exit": 0,
+          "json": "out-mut.json"
+        }
+      ]
+    },
+    {
+      "name": "v1 設定檔沒寫 mutant_coverage_threshold：migrate 寫成 0，沒測試的新程式照樣通過，跟 v1 一樣",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "content": "{\n  \"language\": \"go\",\n  \"base\": \"origin/main\",\n  \"crap_threshold\": 12,\n  \"efficacy_threshold\": 80,\n  \"exclude\": [\"tools/\", \"vendor/\", \"node_modules/\"]\n}\n"
+        },
+        {
+          "file": "notest/sub.go",
+          "content": "package notest\n\nfunc Sub(a, b int) int {\n\treturn a - b\n}\n"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "migrate"
+          ],
+          "exit": 0,
+          "contains": [
+            "\"reach_rate_threshold\": 0"
+          ]
+        },
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main"
+          ],
+          "exit": 0
+        }
       ]
     }
   ]

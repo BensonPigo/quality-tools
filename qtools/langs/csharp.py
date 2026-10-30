@@ -19,106 +19,112 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 
-from common import QualityError, is_excluded, list_files, normalize, project_path, run, tools_dir
+from qtools.langs.base import Language
+from qtools.model import Function, LIVED, KILLED, NOT_COVERED, NOT_VIABLE, SKIPPED, TIMED_OUT, Mutant
+from qtools.proc import (TOOL_ROOT, QualityError, is_excluded, list_files, normalize, project_path, run, tail,
+                         tools_dir)
 
-SOURCE_GLOBS = ["*.cs"]
 STRYKER_VERSION = "5.0.0"
-CSMETRICS_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dotnet", "CsMetrics")
+CSMETRICS_SRC = os.path.join(TOOL_ROOT, "dotnet", "CsMetrics")
 
 # Stryker 的狀態對應到共用格式
 STATUS = {
-    "Killed": "KILLED", "Timeout": "TIMED_OUT", "Survived": "LIVED", "NoCoverage": "NOT_COVERED",
-    "CompileError": "NOT_VIABLE", "RuntimeError": "NOT_VIABLE", "Ignored": "SKIPPED", "Pending": "SKIPPED",
+    "Killed": KILLED, "Timeout": TIMED_OUT, "Survived": LIVED, "NoCoverage": NOT_COVERED,
+    "CompileError": NOT_VIABLE, "RuntimeError": NOT_VIABLE, "Ignored": SKIPPED, "Pending": SKIPPED,
 }
 
 
-def is_test(path):
-    project = _projects().get(package_dir(path))
-    return bool(project and project["test"])
+class CSharp(Language):
+    SOURCE_GLOBS = ["*.cs"]
+
+    def is_test(self, path):
+        project = _projects().get(self.package_dir(path))
+        return bool(project and project["test"])
+
+    def package_dir(self, path):
+        """往上找最近一個有 .csproj 的目錄。"""
+        projects = _projects()
+        d = os.path.dirname(normalize(path))
+        while True:
+            if (d or ".") in projects:
+                return d or "."
+            if not d:
+                return "."
+            d = os.path.dirname(d)
+
+    def run_tests(self, cfg):
+        return subprocess.call(["dotnet", "test"] + _target(cfg))
+
+    def measure_functions(self, cfg):
+        files = [f for f in list_files(self.SOURCE_GLOBS)
+                 if not self.is_test(f) and not is_excluded(f, cfg) and not _in_build_output(f)]
+        if not files:
+            return []
+
+        r = subprocess.run(_csmetrics(), input="\n".join(files), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           encoding="utf-8", errors="replace")
+        if r.returncode != 0:
+            raise QualityError("CsMetrics 執行失敗：\n" + r.stderr)
+        funcs = [Function(file=normalize(f["file"]), name=f["name"], start=f["start"], end=f["end"],
+                          complexity=f["complexity"], coverage=0.0) for f in json.loads(r.stdout)]
+
+        hits = _line_hits(cfg)
+        for f in funcs:
+            lines = [h for n, h in hits.get(f.file, {}).items() if f.start <= n <= f.end]
+            f.coverage = sum(1 for h in lines if h > 0) / len(lines) if lines else 0.0
+        return funcs
+
+    def measure_mutants(self, cfg, dirs=None, files=None):
+        projects = _projects()
+        if dirs is None:
+            dirs = [d for d, p in projects.items() if not p["test"] and not is_excluded(d + "/", cfg)]
+
+        mutants = []
+        for d in sorted(dirs):
+            project = projects.get(d)
+            if not project or project["test"]:
+                continue
+            tests = [p["file"] for p in projects.values() if p["test"] and project["file"].lower() in p["refs"]]
+            if not tests:
+                print("抓錯檢查：{} 沒有測試專案參照它，略過".format(d), file=sys.stderr, flush=True)
+                continue
+
+            print("抓錯檢查：{} ...".format(d), file=sys.stderr, flush=True)
+            with tempfile.TemporaryDirectory() as tmp:
+                args = [_stryker(), "--project", os.path.basename(project["file"]),
+                        "--reporter", "json", "--output", tmp, "--skip-version-check"]
+                for t in tests:
+                    args += ["--test-project", os.path.relpath(t, d)]
+                for f in files or []:
+                    if self.package_dir(f) == d:
+                        args += ["--mutate", normalize(os.path.relpath(f, d))]
+                r = run(args, cwd=d)
+                report = os.path.join(tmp, "reports", "mutation-report.json")
+                if not os.path.exists(report):
+                    raise QualityError("Stryker 執行失敗（{}）：\n{}".format(d, tail(r.stdout + r.stderr)))
+                with open(report, encoding="utf-8") as fp:
+                    result = json.load(fp)
+            self.tools["stryker-net"] = STRYKER_VERSION
+
+            for path, info in result["files"].items():
+                file = project_path(path)
+                for m in info["mutants"]:
+                    mutants.append(Mutant(
+                        file=file,
+                        line=m["location"]["start"]["line"],
+                        column=m["location"]["start"].get("column"),
+                        status=STATUS.get(m["status"], SKIPPED),
+                        mutator=m["mutatorName"],
+                    ))
+        return mutants
 
 
-def package_dir(path):
-    """往上找最近一個有 .csproj 的目錄。"""
-    projects = _projects()
-    d = os.path.dirname(normalize(path))
-    while True:
-        if (d or ".") in projects:
-            return d or "."
-        if not d:
-            return "."
-        d = os.path.dirname(d)
-
-
-def run_tests(cfg):
-    return subprocess.call(["dotnet", "test"] + _target(cfg))
-
-
-def measure_functions(cfg):
-    files = [f for f in list_files(SOURCE_GLOBS)
-             if not is_test(f) and not is_excluded(f, cfg) and not _in_build_output(f)]
-    if not files:
-        return []
-
-    r = subprocess.run(_csmetrics(), input="\n".join(files), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                       encoding="utf-8", errors="replace")
-    if r.returncode != 0:
-        raise QualityError("CsMetrics 執行失敗：\n" + r.stderr)
-    funcs = json.loads(r.stdout)
-
-    hits = _line_hits(cfg)
-    for f in funcs:
-        f["file"] = normalize(f["file"])
-        lines = [h for n, h in hits.get(f["file"], {}).items() if f["start"] <= n <= f["end"]]
-        f["coverage"] = sum(1 for h in lines if h > 0) / len(lines) if lines else 0.0
-    return funcs
-
-
-def measure_mutants(cfg, dirs=None, files=None):
-    projects = _projects()
-    if dirs is None:
-        dirs = [d for d, p in projects.items() if not p["test"] and not is_excluded(d + "/", cfg)]
-
-    mutants = []
-    for d in sorted(dirs):
-        project = projects.get(d)
-        if not project or project["test"]:
-            continue
-        tests = [p["file"] for p in projects.values() if p["test"] and project["file"].lower() in p["refs"]]
-        if not tests:
-            print("變異測試：{} 沒有測試專案參照它，略過".format(d), file=sys.stderr, flush=True)
-            continue
-
-        print("變異測試：{} ...".format(d), file=sys.stderr, flush=True)
-        with tempfile.TemporaryDirectory() as tmp:
-            args = [_stryker(), "--project", os.path.basename(project["file"]),
-                    "--reporter", "json", "--output", tmp, "--skip-version-check"]
-            for t in tests:
-                args += ["--test-project", os.path.relpath(t, d)]
-            for f in files or []:
-                if package_dir(f) == d:
-                    args += ["--mutate", normalize(os.path.relpath(f, d))]
-            r = run(args, cwd=d)
-            report = os.path.join(tmp, "reports", "mutation-report.json")
-            if not os.path.exists(report):
-                raise QualityError("Stryker 執行失敗（{}）：\n{}".format(d, _tail(r.stdout + r.stderr)))
-            with open(report, encoding="utf-8") as fp:
-                result = json.load(fp)
-
-        for path, info in result["files"].items():
-            file = project_path(path)
-            for m in info["mutants"]:
-                mutants.append({
-                    "file": file,
-                    "line": m["location"]["start"]["line"],
-                    "status": STATUS.get(m["status"], "SKIPPED"),
-                    "mutator": m["mutatorName"],
-                })
-    return mutants
+LANGUAGE = CSharp
 
 
 def _target(cfg):
-    """dotnet test 的對象。根目錄有多個 .sln 時，要在 .quality.json 設定 dotnet_solution。"""
-    return [cfg["dotnet_solution"]] if cfg.get("dotnet_solution") else []
+    """dotnet test 的對象。根目錄有多個 .sln 時，要在 .quality.json 設定 csharp.solution。"""
+    return [cfg["csharp"]["solution"]] if cfg["csharp"]["solution"] else []
 
 
 def _line_hits(cfg):
@@ -126,7 +132,7 @@ def _line_hits(cfg):
     with tempfile.TemporaryDirectory() as tmp:
         r = run(["dotnet", "test"] + _target(cfg) + ["--collect:XPlat Code Coverage", "--results-directory", tmp])
         if r.returncode != 0:
-            raise QualityError("測試沒有全部通過，請先修好第一重約束（單元測試）再量 CRAP：\n" + _tail(r.stdout + r.stderr))
+            raise QualityError("測試沒有全部通過，請先修好第一關（單元測試）再量 CRAP：\n" + tail(r.stdout + r.stderr))
 
         hits = {}
         for report in glob.glob(os.path.join(tmp, "**", "*.cobertura.xml"), recursive=True):
@@ -201,7 +207,7 @@ def _csmetrics():
         shutil.copytree(CSMETRICS_SRC, src, ignore=shutil.ignore_patterns("bin", "obj"))
         r = run(["dotnet", "build", "-c", "Release", "-o", out], cwd=src)
         if r.returncode != 0:
-            raise QualityError("CsMetrics 建置失敗：\n" + _tail(r.stdout + r.stderr))
+            raise QualityError("CsMetrics 建置失敗：\n" + tail(r.stdout + r.stderr))
     return ["dotnet", dll]
 
 
@@ -215,7 +221,3 @@ def _stryker():
         if r.returncode != 0:
             raise QualityError("Stryker.NET 安裝失敗：\n" + r.stdout + r.stderr)
     return exe
-
-
-def _tail(text, n=40):
-    return "\n".join(text.rstrip().splitlines()[-n:])

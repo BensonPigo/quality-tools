@@ -1,11 +1,16 @@
-"""quality.py 和各語言轉換模組共用的工具。只用 Python 標準函式庫。"""
+"""執行外部指令、路徑和檔案清單的共用工具。只用 Python 標準函式庫。"""
 
 import os
 import subprocess
 
+# 工具本身的根目錄（quality.py 所在的目錄），dotnet/、js/、python/ 底下的輔助程式從這裡找
+TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 class QualityError(Exception):
-    """量測沒辦法完成，例如測試沒過、工具執行失敗。訊息會直接顯示給使用者。"""
+    """量測沒辦法完成，或設定有誤，例如測試沒過、工具執行失敗。訊息會直接顯示給使用者，結束碼 2。"""
+
+    exit_code = 2
 
 
 def run(cmd, cwd=None, env=None):
@@ -17,6 +22,13 @@ def run(cmd, cwd=None, env=None):
         )
     except FileNotFoundError:
         raise QualityError("找不到指令 {}，請確認已安裝並加入 PATH".format(cmd[0]))
+
+
+def git(*args):
+    r = run(["git", "-c", "core.quotepath=false"] + list(args))
+    if r.returncode != 0:
+        raise QualityError("git {} 執行失敗：\n{}".format(" ".join(args), r.stderr))
+    return r.stdout
 
 
 def normalize(path):
@@ -66,3 +78,7 @@ def is_excluded(path, cfg):
         if path == e or path.startswith(e + "/"):
             return True
     return False
+
+
+def tail(text, n=40):
+    return "\n".join(text.rstrip().splitlines()[-n:])

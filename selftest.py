@@ -18,6 +18,14 @@
 2. test 要通過；crap（整個專案）的表格要跟 selftest/<範例>.crap.txt 一致
 3. 依序執行 scenarios：每個情境先把工作目錄還原，再照 edits 改檔案，執行指令，檢查結束碼和輸出
 
+每個範例在 git init 之前，先把本工具 git ls-files 列出的檔案複製到範例的 tools/quality/，模擬 submodule 掛載，
+所有情境都在這個狀態下跑。selftest.py 一開始會先跑 dev/unit_checks.py（不需要語言工具的純函式測試），沒過就整體失敗。
+
+情境（scenarios）可以用 run + exit + contains 寫單一步驟，也可以用 steps 寫多個步驟。每一步是
+{run, exit, contains, not_contains, json}：同一個情境的各步之間不還原工作目錄；json 是該步 --json 寫出的檔名，
+讀檔後用 qtools.report_schema.validate 比對，不符就算該步失敗。run 的第一個元素是 {venv_python} 時，
+直接執行範例 venv 的 Python，不經過 quality.py。
+
 範例專案需要的語言工具（Go、.NET SDK、Node、Python）要先裝好。
 """
 
@@ -31,8 +39,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-QUALITY = os.path.join(HERE, "quality.py")
 CASES = os.path.join(HERE, "selftest")
+UNIT_CHECKS = os.path.join(HERE, "dev", "unit_checks.py")
 FILE_MARK = "--- file: "  # 打包檔裡每個檔案的開頭
 PACK_SKIP = {".git", "node_modules", ".venv", "__pycache__", "bin", "obj", "coverage", "reports", ".stryker-tmp"}
 VENV_PYTHON = os.path.join(".venv", "Scripts", "python.exe") if os.name == "nt" else os.path.join(".venv", "bin", "python")
@@ -58,6 +66,12 @@ def main():
         pack(args.pack[0], args.pack[1])
         return
 
+    # 純函式的單元測試先跑，不需要語言工具，幾秒內就能知道版本檢查、migrate、schema 有沒有壞
+    print("=== dev/unit_checks.py", flush=True)
+    if subprocess.call([sys.executable, UNIT_CHECKS], env=dict(os.environ, PYTHONUTF8="1")) != 0:
+        print("\nFAIL：dev/unit_checks.py 沒過")
+        sys.exit(1)
+
     names = args.samples or sorted(f[:-len(".json")] for f in os.listdir(CASES) if f.endswith(".json"))
     failed = []
     for name in names:
@@ -80,16 +94,9 @@ def run_sample(name, args):
     proj = os.path.join(tmp, name)
     failed = []
     try:
-        unpack(name, proj)
-        for cmd in case.get("setup", []):
-            cmd = [sys.executable if c == "{python}" else os.path.join(proj, VENV_PYTHON) if c == "{venv_python}" else c
-                   for c in cmd]
-            r = run(cmd, proj)
-            if r.returncode != 0:
-                return ["setup 失敗：{}\n{}".format(" ".join(cmd), r.stdout[-3000:])]
-        for cmd in (["init", "-q", "-b", "main"], ["add", "-A"],
-                    ["-c", "user.name=selftest", "-c", "user.email=selftest@example.com", "commit", "-q", "-m", "init"]):
-            run(["git"] + cmd, proj, check=True)
+        error = prepare(name, proj, case.get("setup", []))
+        if error:
+            return [error]
 
         failed += check("test", proj, ["test"], 0)
 
@@ -119,18 +126,61 @@ def run_sample(name, args):
                         break
                     text = text.replace(e["old"], e["new"])
                 else:
-                    text = e["content"]  # 新增檔案
+                    text = e["content"]  # 新增檔案，或整份換掉
                     os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "w", encoding="utf-8", newline="") as fp:
                     fp.write(text)
             else:
-                failed += check(sc["name"], proj, sc["run"], sc["exit"], sc.get("contains", []))
+                # 單一步驟的舊格式，等於只有一步的 steps；各步之間不還原工作目錄
+                steps = sc.get("steps") or [sc]
+                for i, step in enumerate(steps, 1):
+                    title = sc["name"] if len(steps) == 1 else "{}（步驟 {}）".format(sc["name"], i)
+                    failed += check(title, proj, step["run"], step["exit"], step.get("contains", []),
+                                    step.get("not_contains", []), step.get("json"))
     finally:
         if args.keep:
             print("  暫存目錄：" + proj)
         else:
             shutil.rmtree(tmp, onerror=_force_remove)
     return failed
+
+
+def prepare(name, proj, setup, unpack_fn=None, mount=True):
+    """解開範例、掛上本工具、執行 setup、git init 並 commit 到 main。成功回傳 None，失敗回傳訊息。
+
+    dev/v1_parity.py 也用這個函式準備範例：unpack_fn 換成 v1.0.0 的解包函式，mount 設成 False。
+    """
+    (unpack_fn or unpack)(name, proj)
+    if mount:
+        mount_tool(proj)
+    for cmd in setup:
+        cmd = [sys.executable if c == "{python}" else os.path.join(proj, VENV_PYTHON) if c == "{venv_python}" else c
+               for c in cmd]
+        r = run(cmd, proj)
+        if r.returncode != 0:
+            return "setup 失敗：{}\n{}".format(" ".join(cmd), r.stdout[-3000:])
+    for cmd in (["init", "-q", "-b", "main"], ["add", "-A"],
+                ["-c", "user.name=selftest", "-c", "user.email=selftest@example.com", "commit", "-q", "-m", "init"]):
+        run(["git"] + cmd, proj, check=True)
+    return None
+
+
+def mount_tool(proj):
+    """把本工具複製到 proj/tools/quality，模擬 submodule 掛載。
+
+    用 git ls-files 列檔，所以只有進版控的檔案會被複製；還沒 git add 的新檔案也算（開發中的工具），已刪除但還沒 commit 的不算。
+    """
+    files = set()
+    for args in (["ls-files"], ["ls-files", "--others", "--exclude-standard"]):
+        r = run(["git", "-c", "core.quotepath=false"] + args, HERE, check=True)
+        files.update(line for line in r.stdout.splitlines() if line.strip())
+    for f in sorted(files):
+        src = os.path.join(HERE, f)
+        if not os.path.isfile(src):
+            continue
+        dest = os.path.join(proj, "tools", "quality", f)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copyfile(src, dest)
 
 
 def unpack(name, dest):
@@ -185,14 +235,34 @@ def crap_table(stdout):
     return "".join(lines[start:])
 
 
-def check(title, proj, cmd, code, contains=()):
-    r = quality(proj, cmd)
-    missing = [c for c in contains if c not in r.stdout]
-    ok = r.returncode == code and not missing
-    detail = "結束碼 {}（預期 {}）".format(r.returncode, code)
+def check(title, proj, cmd, code, contains=(), not_contains=(), json_file=None):
+    if cmd and cmd[0] == "{venv_python}":
+        r = run([os.path.join(proj, VENV_PYTHON)] + cmd[1:], proj)
+    else:
+        r = quality(proj, cmd)
+    output = r.stdout + r.stderr  # 錯誤訊息（結束碼 2）印在 stderr
+    missing = [c for c in contains if c not in output]
+    unexpected = [c for c in not_contains if c in output]
+    problems = []
+    if r.returncode != code:
+        problems.append("結束碼 {}（預期 {}）".format(r.returncode, code))
     if missing:
-        detail += "；輸出缺少：" + "、".join(missing)
-    return report(title, r, ok, detail)
+        problems.append("輸出缺少：" + "、".join(missing))
+    if unexpected:
+        problems.append("輸出不該出現：" + "、".join(unexpected))
+    if json_file:
+        problems += _json_problems(os.path.join(proj, json_file), json_file)
+    return report(title, r, not problems, "；".join(problems))
+
+
+def _json_problems(path, name):
+    """讀 --json 寫出的檔案，用 report_schema 比對格式。"""
+    from qtools import report_schema
+    if not os.path.exists(path):
+        return ["沒有寫出 " + name]
+    with open(path, encoding="utf-8") as fp:
+        data = json.load(fp)
+    return ["{} 格式不符：{}".format(name, e) for e in report_schema.validate(data)]
 
 
 def report(title, r, ok, detail):
@@ -205,11 +275,12 @@ def report(title, r, ok, detail):
 
 
 def quality(proj, cmd):
-    return run([sys.executable, QUALITY] + cmd, proj)
+    # 跑掛在範例裡的那一份，跟各專案用 submodule 的方式一樣
+    return run([sys.executable, os.path.join(proj, "tools", "quality", "quality.py")] + cmd, proj)
 
 
 def run(cmd, cwd, check=False):
-    env = dict(os.environ, PYTHONUTF8="1")
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")  # 不要在掛載的工具目錄留下 .pyc
     r = subprocess.run(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        encoding="utf-8", errors="replace", shell=os.name == "nt" and cmd[0] == "npm")
     if check and r.returncode != 0:
