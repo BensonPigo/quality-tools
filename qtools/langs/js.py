@@ -1,8 +1,8 @@
 """JavaScript / TypeScript 的量測轉換。
 
-- 圈複雜度和函式起訖行：js/complexity.cjs（用 TypeScript 的解析器，規則見檔案開頭）
+- 圈複雜度和函式起訖行：qtools/helpers/js/complexity.cjs（用 TypeScript 的解析器，規則見檔案開頭）
 - 覆蓋率：Vitest（@vitest/coverage-v8）或 Jest 內建，取敘述覆蓋率，再依函式範圍計算
-- 變異測試：StrykerJS
+- 抓錯檢查：StrykerJS
 
 測試框架依 package.json 的相依套件自動判斷，也可以在 .quality.json 用 js.test_runner 指定 vitest 或 jest。
 「套件」對應到 package.json 所在的目錄；現況報告的抓錯統計則依資料夾分組。
@@ -25,7 +25,7 @@ from qtools.proc import (TOOL_ROOT, QualityError, is_excluded, list_files, norma
                          tools_dir)
 
 TYPESCRIPT_VERSION = "5.9.3"  # 只用來解析原始碼。TypeScript 7 改用 Go 重寫，原本的 JavaScript API 不一定還在
-COMPLEXITY_JS = os.path.join(TOOL_ROOT, "js", "complexity.cjs")
+COMPLEXITY_JS = os.path.join(TOOL_ROOT, "qtools", "helpers", "js", "complexity.cjs")
 
 DEFAULTS = dict(BASE_DEFAULTS)  # 不排除任何改法，逾時和並行用 StrykerJS 自己的預設
 
@@ -200,7 +200,7 @@ def check_stryker(core_version, runner_version, runner, vitest_version=None):
     if vitest_version and _major(vitest_version) >= 5 and _version(core_version) < (10, 1, 1):
         raise QualityError(
             "Vitest {} 要搭配 StrykerJS 10.1.1 以上（目前是 {}）。"
-            "版本不合時，所有突變體都會被判成存活，結果不可信。".format(vitest_version, core_version))
+            "版本不合時，所有改壞的版本都會被判成沒抓到，結果不可信。".format(vitest_version, core_version))
 
 
 def _packages(cfg):

@@ -1,7 +1,7 @@
 // 從標準輸入讀 .js/.ts 檔案路徑（一行一個），輸出 JSON：每個函式的 file、name、start、end、complexity。
 //
 // 用法：node complexity.cjs <typescript 套件的目錄>
-// 用 TypeScript 的解析器，所以 JavaScript、TypeScript、JSX、TSX 都能讀。由 lang_js.py 呼叫。
+// 用 TypeScript 的解析器，所以 JavaScript、TypeScript、JSX、TSX 都能讀。由 qtools/langs/js.py 呼叫。
 //
 // 圈複雜度 = 1 + 判斷點數量，規則對齊 Go 的 gocyclo：
 //   +1：if（含 else if）、for、for...in、for...of、while、do...while、catch、
@@ -35,7 +35,7 @@ for (const file of fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean)) {
         file,
         name: nameOf(node, className),
         start: start.line + 1,
-        // 從 0 起算的欄位。lang_js.py 用它排除 `const f = () => {...}` 這種宣告敘述：
+        // 從 0 起算的欄位。qtools/langs/js.py 用它排除 `const f = () => {...}` 這種宣告敘述：
         // 宣告在載入時就會執行，不能算成函式有被測試
         startColumn: start.character,
         end: line(node.end),

@@ -1,8 +1,8 @@
 """C# / .NET 的量測轉換。
 
-- 圈複雜度和函式起訖行：dotnet/CsMetrics（用 Roslyn 解析原始碼，規則見 Program.cs）
+- 圈複雜度和函式起訖行：qtools/helpers/dotnet/CsMetrics（用 Roslyn 解析原始碼，規則見 Program.cs）
 - 覆蓋率：coverlet（dotnet test --collect:"XPlat Code Coverage"），只取每一行有沒有執行，再依函式範圍計算
-- 變異測試：Stryker.NET
+- 抓錯檢查：Stryker.NET
 
 coverlet 報告裡也有複雜度，但那是用編譯後的 IL 算的，數字大約是原始碼圈複雜度的兩倍，不能拿來跟門檻 12 比，所以不用。
 「套件」對應到 .csproj 所在的目錄。
@@ -27,7 +27,7 @@ from qtools.proc import (TOOL_ROOT, QualityError, is_excluded, list_files, norma
                          tools_dir)
 
 STRYKER_VERSION = "5.0.0"
-CSMETRICS_SRC = os.path.join(TOOL_ROOT, "dotnet", "CsMetrics")
+CSMETRICS_SRC = os.path.join(TOOL_ROOT, "qtools", "helpers", "dotnet", "CsMetrics")
 
 DEFAULTS = dict(BASE_DEFAULTS)  # 不排除任何改法，逾時和並行用 Stryker.NET 自己的預設
 

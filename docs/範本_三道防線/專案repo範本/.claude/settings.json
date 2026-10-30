@@ -2,11 +2,13 @@
   "permissions": {
     "deny": [
       "Edit(/.quality.json)",
+      "Edit(/.quality-equivalents.json)",
       "Edit(/.gitmodules)",
       "Edit(/tools/quality/**)",
       "Edit(/.gitea/**)",
       "Edit(/.github/**)",
-      "Edit(/.claude/**)"
+      "Edit(/.claude/**)",
+      "Edit(/CODEOWNERS)"
     ]
   },
   "hooks": {

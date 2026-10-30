@@ -1,0 +1,13 @@
+# 放到 .gitea/CODEOWNERS 或 .github/CODEOWNERS（GitHub 也認根目錄的 CODEOWNERS）。
+# @your-org/quality-reviewers 是佔位的審核群組，換成你們實際的群組或帳號。
+# 改到下面這些檔案的 PR，要這個群組核准才能合併。AI 用的帳號不要放進這個群組。
+# Gitea 的 CODEOWNERS 比對規則和 GitHub 不完全相同，放進 Gitea 前請對照該版本的說明，這份範本沒有在 Gitea 上測過。
+
+/.quality.json                @your-org/quality-reviewers
+/.quality-equivalents.json    @your-org/quality-reviewers
+/.gitmodules                  @your-org/quality-reviewers
+/tools/quality                @your-org/quality-reviewers
+/.claude/                     @your-org/quality-reviewers
+/.gitea/                      @your-org/quality-reviewers
+/.github/                     @your-org/quality-reviewers
+/CODEOWNERS                   @your-org/quality-reviewers

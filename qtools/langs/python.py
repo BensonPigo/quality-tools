@@ -2,7 +2,7 @@
 
 - 圈複雜度和函式起訖行：Python 內建的 ast 模組，規則見 _complexity
 - 覆蓋率：coverage.py，取敘述覆蓋率，再依函式範圍計算
-- 變異測試：cosmic-ray（mutmut 需要 fork，在 Windows 上只能透過 WSL 執行，所以不用）
+- 抓錯檢查：cosmic-ray（mutmut 需要 fork，在 Windows 上只能透過 WSL 執行，所以不用）
 
 測試框架是 pytest。pytest、coverage、cosmic-ray 要裝在專案的 Python 環境裡：
 專案根目錄有 .venv 就用它，否則用執行 quality.py 的 Python，也可以在 .quality.json 用 python.interpreter 指定。
@@ -24,10 +24,10 @@ from qtools.model import Function, KILLED, LIVED, NOT_COVERED, NOT_VIABLE, SKIPP
 from qtools.mutation import span_text
 from qtools.proc import TOOL_ROOT, QualityError, is_excluded, list_files, normalize, project_path, run, tail
 
-SKIP_FILTER = os.path.join(TOOL_ROOT, "python", "cr_skip_uncovered.py")
+SKIP_FILTER = os.path.join(TOOL_ROOT, "qtools", "helpers", "python", "cr_skip_uncovered.py")
 NOT_COVERED_MARK = "quality:not-covered"  # 要跟 cr_skip_uncovered.py 一致
 PYTEST = ["-m", "pytest", "-q", "-p", "no:cacheprovider"]
-DEFAULT_TIMEOUT = 30  # cosmic-ray 每個突變體的時限（秒）
+DEFAULT_TIMEOUT = 30  # cosmic-ray 每個改壞的版本的時限（秒）
 
 # 各 repo 自己安裝的 cosmic-ray，這個版本跑過 selftest，分數對得上
 COSMIC_RAY_VERIFIED = ["8.7.0"]
@@ -307,7 +307,7 @@ def _python(cfg):
 
 def _env(pythonpath=None):
     env = dict(os.environ)
-    # 測試輸出有中文時，Windows 預設用 Big5，cosmic-ray 用 UTF-8 讀會出錯，把被殺死的突變體誤判成無效
+    # 測試輸出有中文時，Windows 預設用 Big5，cosmic-ray 用 UTF-8 讀會出錯，把被抓到的改壞版本誤判成無效
     env["PYTHONUTF8"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if pythonpath:

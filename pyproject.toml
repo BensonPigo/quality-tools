@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quality-tools"
+version = "2.0.0"
+description = "三道檢查（單元測試、CRAP、抓錯檢查）的量測工具"
+requires-python = ">=3.8"
+
+[project.scripts]
+quality = "qtools.cli:main"
+
+[tool.setuptools]
+packages = ["qtools", "qtools.langs"]
+
+# 輔助程式放在 qtools/helpers 底下（含 CsMetrics 的 .cs 與 .csproj），bin、obj 是建置產物不收
+[tool.setuptools.package-data]
+qtools = ["helpers/*/*", "helpers/*/*/*"]

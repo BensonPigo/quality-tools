@@ -1,3 +1,5 @@
 __pycache__/
-dotnet/CsMetrics/bin/
-dotnet/CsMetrics/obj/
+qtools/helpers/dotnet/CsMetrics/bin/
+qtools/helpers/dotnet/CsMetrics/obj/
+build/
+*.egg-info/

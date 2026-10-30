@@ -3,7 +3,7 @@
 import os
 import subprocess
 
-# 工具本身的根目錄（quality.py 所在的目錄），dotnet/、js/、python/ 底下的輔助程式從這裡找
+# 工具本身的根目錄（quality.py 所在的目錄），qtools/helpers/ 底下的輔助程式從這裡找
 TOOL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

@@ -1,4 +1,4 @@
-"""Go 的量測轉換：覆蓋率用 go test -cover，圈複雜度用 gocyclo，變異測試用 gremlins。"""
+"""Go 的量測轉換：覆蓋率用 go test -cover，圈複雜度用 gocyclo，抓錯檢查用 gremlins。"""
 
 import json
 import os

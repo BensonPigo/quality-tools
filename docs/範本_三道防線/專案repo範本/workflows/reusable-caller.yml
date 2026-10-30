@@ -1,0 +1,23 @@
+# 三道檢查（引用 quality-tools 的 reusable workflow）：每個要合併進 main 的 PR 都會自動執行。
+# 放到目標 repo 的 .gitea/workflows/quality.yml；用 GitHub 的話放 .github/workflows/quality.yml。
+#
+# `uses:` 後面 @ 的版本，和 `with.tools-ref` 必須填同一個值（下面兩處的 v2.0.0），升級時兩處一起改。
+# 專案如果同時掛了 tools/quality 這個 submodule，submodule 記錄的 commit 也要是這一版，否則 workflow 會失敗並說版本不一致。
+# 這份寫法沒有在 Gitea 上測過；Gitea 要不要用完整網址引用，以你們 Gitea 版本的說明為準。
+name: 三道檢查
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    uses: qa/quality-tools/.github/workflows/quality.yml@v2.0.0
+    with:
+      language: go            # go、csharp、js、python
+      tools-ref: v2.0.0       # 要和上面 uses 的 @ 後面相同
+      # install: npm ci       # 安裝專案相依套件的指令；JS 專案、Python 專案要填
+      # skip: mutation        # 不跑的關，空白分隔
+      # tools-repository: qa/quality-tools   # quality-tools 不在同一個擁有者底下時才填
+    secrets:
+      tools-token: ${{ secrets.QUALITY_TOOLS_TOKEN }}   # quality-tools 是私有 repo 時，需要一個能讀它的存取權杖

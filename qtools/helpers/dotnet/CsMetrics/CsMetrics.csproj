@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- 用 Roslyn 解析 C# 原始碼，輸出每個函式的起訖行號和圈複雜度。由 lang_csharp.py 建置和呼叫。 -->
+  <!-- 用 Roslyn 解析 C# 原始碼，輸出每個函式的起訖行號和圈複雜度。由 qtools/langs/csharp.py 建置和呼叫。 -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
