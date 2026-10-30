@@ -6,14 +6,18 @@ selftest.py 一開始會先跑這支。檔名刻意不符合 test_*.py、*_test.
     python dev/unit_checks.py
 """
 
+import contextlib
 import copy
+import io
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from qtools import config, crap, mutation, report, report_schema  # noqa: E402
+from qtools import config, crap, equivalents, mutation, report, report_schema  # noqa: E402
 from qtools.langs import base, csharp, go, js, python  # noqa: E402
 from qtools.model import Function, Mutant  # noqa: E402
 from qtools.proc import QualityError  # noqa: E402
@@ -162,9 +166,18 @@ class MigrateChecks(unittest.TestCase):
         self.assertEqual(self.migrate()["mutation"]["reach_rate_threshold"], 0)  # 不自動調成 50
         self.assertEqual(self.migrate(mutant_coverage_threshold=40)["mutation"]["reach_rate_threshold"], 40)
 
-    def test_python_mutant_timeout(self):
+    def test_python_mutant_timeout_only_for_python(self):
         self.assertNotIn("timeout_seconds", self.migrate()["mutation"])
-        self.assertEqual(self.migrate(python_mutant_timeout=60)["mutation"]["timeout_seconds"], 60)
+        self.assertEqual(self.migrate(language="python", python_mutant_timeout=60)["mutation"]["timeout_seconds"], 60)
+        for language in ("go", "csharp", "js"):
+            notes = []
+            v2 = config.migrate_config({"language": language, "python_mutant_timeout": 60}, notes)
+            self.assertNotIn("timeout_seconds", v2["mutation"], language)
+            self.assertEqual(len(notes), 1, language)
+            self.assertIn("只對 Python 有效，已略過", notes[0])
+        notes = []
+        config.migrate_config({"language": "python", "python_mutant_timeout": 60}, notes)
+        self.assertEqual(notes, [])
 
     def test_dotnet_solution(self):
         self.assertNotIn("csharp", self.migrate())
@@ -203,7 +216,8 @@ class SchemaChecks(unittest.TestCase):
         lang = go.LANGUAGE()
         lang.tools["gocyclo"] = "v0.6.0"
         crap_part = report.crap_json(funcs, 12, 0) if command != "mutation" else None
-        mutation_part = report.mutation_json(mutants, counts, cfg, lang.report_group) if command != "crap" else None
+        settings = lang.settings(cfg)
+        mutation_part = report.mutation_json(mutants, counts, cfg, lang.report_group, settings) if command != "crap" else None
         return report.build_report(command, cfg, lang, "main", "abc123", True, crap_part, mutation_part)
 
     def test_valid_reports(self):
@@ -250,6 +264,20 @@ class SchemaChecks(unittest.TestCase):
         data["crap"] = None
         data["mutation"] = None
         self.assertTrue(report_schema.validate(data))
+
+    def test_settings_required_and_typed(self):
+        data = self.sample("mutation")
+        self.assertEqual(data["mutation"]["settings"], {"timeout_seconds": None, "workers": None, "exclude_mutators": []})
+        del data["mutation"]["settings"]["workers"]
+        self.assertTrue(any("缺少欄位 workers" in e for e in report_schema.validate(data)))
+        data = self.sample("mutation")
+        del data["mutation"]["settings"]
+        self.assertTrue(any("缺少欄位 settings" in e for e in report_schema.validate(data)))
+        data = self.sample("mutation")
+        data["mutation"]["settings"] = {"timeout_seconds": 60, "workers": "2", "exclude_mutators": ["A"]}
+        self.assertTrue(report_schema.validate(data))
+        data["mutation"]["settings"] = {"timeout_seconds": 60.5, "workers": 2, "exclude_mutators": ["A"]}
+        self.assertEqual(report_schema.validate(data), [])
 
     def test_nullable_fields_accept_null(self):
         data = self.sample("mutation")
@@ -303,6 +331,307 @@ class MutationChecks(unittest.TestCase):
         self.assertEqual(mutation.judge(self.counts(KILLED=8, LIVED=2, NOT_COVERED=10), cfg), [])
         self.assertEqual(len(mutation.judge(self.counts(KILLED=7, LIVED=3), cfg)), 1)
         self.assertEqual(len(mutation.judge(self.counts(KILLED=1, NOT_COVERED=9), cfg)), 1)
+
+def _mutant(file="a.go", line=5, status="LIVED", mutator="CONDITIONALS_BOUNDARY", text="if total >= 1000 {", **extra):
+    return Mutant(file, line, status, mutator, line_text=text, **extra)
+
+
+def _entry(**extra):
+    e = {"file": "a.go", "mutator": "CONDITIONALS_BOUNDARY", "line_text": "if total >= 1000 {",
+         "reason": "門檻剛好等於 1000 的那筆，改成 > 結果一樣", "approved_by": "reviewer"}
+    e.update(extra)
+    return e
+
+
+class EquivalentChecks(unittest.TestCase):
+    def load_text(self, text):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "eq.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            return equivalents.load(path)
+
+    def test_missing_file_is_empty_list(self):
+        self.assertEqual(equivalents.load(os.path.join(tempfile.gettempdir(), "no-such-qe.json")), [])
+
+    def test_valid_entries_load_as_is(self):
+        entries = [_entry(), _entry(function="Fee", line_text="x")]
+        self.assertEqual(self.load_text(json.dumps(entries)), entries)
+
+    def test_invalid_entries_exit_2_and_name_the_item(self):
+        no_reason = _entry()
+        del no_reason["reason"]
+        cases = [
+            ("[1]", "第 1 項必須是物件"),
+            (json.dumps([_entry(), no_reason]), "第 2 項缺少必填欄位 reason"),
+            (json.dumps([_entry(approved_by="")]), "第 1 項的 approved_by"),
+            (json.dumps([_entry(), _entry(extra=1)]), "第 2 項有不認得的鍵：extra"),
+            ('{"file": "a.go"}', "最外層必須是陣列"),
+            ("[{", "不是合法的 JSON"),
+        ]
+        for text, expect in cases:
+            with self.assertRaises(QualityError) as cm:
+                self.load_text(text)
+            self.assertEqual(cm.exception.exit_code, 2, text)
+            self.assertIn(expect, str(cm.exception), text)
+
+    def test_match_by_file_mutator_and_trimmed_line_text(self):
+        hit = _mutant(text="if total >= 1000 {")
+        other_mutator = _mutant(mutator="CONDITIONALS_NEGATION")
+        other_file = _mutant(file="b.go")
+        other_text = _mutant(text="if total >= 999 {")
+        moved = _mutant(line=50)  # 行號不同也對得上
+        mutants = [hit, other_mutator, other_file, other_text, moved]
+        unused = equivalents.apply(mutants, [_entry(line_text="  if total >= 1000 {\t")])
+        self.assertEqual([m.status for m in mutants], ["EQUIVALENT", "LIVED", "LIVED", "LIVED", "EQUIVALENT"])
+        self.assertEqual(unused, [])
+
+    def test_file_path_is_normalized(self):
+        for written in ("./a.go", "a.go", ".\\a.go"):
+            m = _mutant()
+            unused = equivalents.apply([m], [_entry(file=written)], scope={"a.go"})
+            self.assertEqual((m.status, unused), ("EQUIVALENT", []), written)
+        entry = _entry(file="./gone.go")
+        self.assertEqual(equivalents.apply([_mutant()], [entry], scope={"gone.go"}), [entry])
+
+    def test_unused_only_counts_files_in_scope(self):
+        entries = [_entry(), _entry(file="gone.go"), _entry(file="other.go", line_text="x")]
+        mutants = [_mutant(text="if total >= 999 {")]
+        # 整個專案：兩個檔案的項目都沒用到
+        self.assertEqual(len(equivalents.apply(mutants, entries)), 3)
+        # --base：只有 a.go 在這次範圍內，gone.go 和 other.go 沒改到，不算
+        self.assertEqual(equivalents.apply(mutants, entries, scope={"a.go"}), [entries[0]])
+
+    def test_used_by_mutant_outside_changed_lines(self):
+        # --base 時，那一行沒改到，改壞版本被過濾掉了，但清單項目還是對得上，不算沒用到
+        universe = [_mutant(line=5), _mutant(line=9, text="y")]
+        counted = [universe[1]]
+        self.assertEqual(equivalents.apply(counted, [_entry()], universe, {"a.go"}), [])
+        self.assertEqual(counted[0].status, "LIVED")
+
+    def test_excluded_mutator_is_not_matched_again(self):
+        m = _mutant(status="EXCLUDED_MUTATOR")
+        unused = equivalents.apply([m], [_entry()])
+        self.assertEqual(m.status, "EXCLUDED_MUTATOR")
+        self.assertEqual(len(unused), 1)
+
+
+class ExcludeMutatorChecks(unittest.TestCase):
+    def test_by_name_any_status(self):
+        ms = [_mutant(status="LIVED", mutator="A"), _mutant(status="KILLED", mutator="A"),
+              _mutant(status="NOT_COVERED", mutator="B")]
+        mutation.exclude_mutators(ms, ["A"])
+        self.assertEqual([m.status for m in ms], ["EXCLUDED_MUTATOR", "EXCLUDED_MUTATOR", "NOT_COVERED"])
+
+    def test_empty_list_changes_nothing(self):
+        ms = [_mutant()]
+        mutation.exclude_mutators(ms, [])
+        self.assertEqual(ms[0].status, "LIVED")
+
+    def test_excluded_not_counted_in_rates(self):
+        ms = [_mutant(status="KILLED"), _mutant(status="LIVED", mutator="A")]
+        mutation.exclude_mutators(ms, ["A"])
+        c = mutation.count(ms)
+        self.assertEqual(c["EXCLUDED_MUTATOR"], 1)
+        self.assertEqual(mutation.kill_rate(c), 100.0)
+
+
+class SettingsChecks(unittest.TestCase):
+    def cfg(self, **mutation_settings):
+        return config.validate({"version": 2, "language": "go", "mutation": mutation_settings})
+
+    def test_every_language_defaults_keep_v1_behaviour(self):
+        for module in (go, csharp, js, python):
+            # Python 的逾時預設是 cosmic-ray 一直以來用的 30 秒（同 v1），報告寫的是實際生效的值
+            want = {"timeout_seconds": 30 if module is python else None, "workers": None, "exclude_mutators": []}
+            self.assertEqual(module.DEFAULTS, want)
+            self.assertEqual(module.LANGUAGE().settings(self.cfg()), want)
+
+    def test_settings_take_config_values(self):
+        s = go.LANGUAGE().settings(self.cfg(timeout_seconds=90, workers=3, exclude_mutators=["INVERT_LOGICAL"]))
+        self.assertEqual(s, {"timeout_seconds": 90, "workers": 3, "exclude_mutators": ["INVERT_LOGICAL"]})
+
+    def test_go_args(self):
+        null = go.LANGUAGE().settings(self.cfg())
+        args = go.gremlins_args(null, "shipping", "out.json", ["sub.d"])
+        self.assertEqual(args, ["unleash", "./shipping", "--timeout-coefficient", "30", "--invert-logical",
+                                "-o", "out.json", "-E", "^sub[.]d[^a-zA-Z0-9_.-]"])
+        self.assertNotIn("--workers", args)
+        with_workers = go.gremlins_args(go.LANGUAGE().settings(self.cfg(workers=3)), "shipping", "out.json")
+        self.assertEqual(with_workers[-2:], ["--workers", "3"])
+
+    def test_go_warns_about_timeout_only(self):
+        lang = go.LANGUAGE()
+        self.assertEqual(lang.unsupported_warnings(lang.settings(self.cfg())), [])
+        self.assertEqual(lang.unsupported_warnings(lang.settings(self.cfg(workers=2))), [])
+        warnings = lang.unsupported_warnings(lang.settings(self.cfg(timeout_seconds=60)))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("timeout_seconds", warnings[0])
+
+    def test_csharp_args_and_config(self):
+        lang = csharp.LANGUAGE()
+        null = lang.settings(self.cfg())
+        base = ["--project", "Shop.csproj", "--reporter", "json", "--output", "/tmp/o", "--skip-version-check"]
+        self.assertEqual(csharp.stryker_args(null, "Shop.csproj", "/tmp/o"), base)
+        both = lang.settings(self.cfg(timeout_seconds=7.5, workers=2))
+        self.assertEqual(csharp.stryker_args(both, "Shop.csproj", "/tmp/o", "/tmp/o/stryker-config.json"),
+                         base + ["--config-file", "/tmp/o/stryker-config.json", "--concurrency", "2"])
+        self.assertEqual(csharp.stryker_config(both), {"stryker-config": {"additional-timeout": 7500}})
+        self.assertEqual(lang.unsupported_warnings(both), [])
+
+    def test_js_options(self):
+        lang = js.LANGUAGE()
+        base = js.stryker_options("vitest", "r.json", ["a.ts"], lang.settings(self.cfg()))
+        self.assertEqual(base, {"testRunner": "vitest", "reporters": ["json"], "jsonReporter": {"fileName": "r.json"},
+                                "mutate": ["a.ts"], "coverageAnalysis": "perTest"})
+        full = js.stryker_options("jest", "r.json", ["a.js"], lang.settings(
+            self.cfg(timeout_seconds=20, workers=2, exclude_mutators=["EqualityOperator"])))
+        self.assertEqual(full["timeoutMS"], 20000)
+        self.assertEqual(full["concurrency"], 2)
+        self.assertEqual(full["mutator"], {"excludedMutations": ["EqualityOperator"]})
+
+    def test_python_config_timeout(self):
+        lang = python.LANGUAGE()
+        files = ["shop/a.py", "shop/b.py"]
+        default = python.cosmic_ray_config(files, "py", lang.settings(self.cfg()))
+        self.assertIn("timeout = 30.0", default.splitlines())
+        self.assertIn("module-path = ['shop/a.py', 'shop/b.py']", default.splitlines())
+        custom = python.cosmic_ray_config(files, "py", lang.settings(self.cfg(timeout_seconds=45)))
+        self.assertIn("timeout = 45.0", custom.splitlines())
+        self.assertEqual(custom.replace("45.0", "30.0"), default)
+        with_workers = python.cosmic_ray_config(files, "py", lang.settings(self.cfg(workers=4)))
+        self.assertEqual(with_workers, default)  # workers 不影響設定檔，只印警告
+        self.assertEqual(len(lang.unsupported_warnings(lang.settings(self.cfg(workers=4)))), 1)
+
+    def test_python_warns_about_workers_only(self):
+        lang = python.LANGUAGE()
+        self.assertEqual(lang.unsupported_warnings(lang.settings(self.cfg())), [])
+        self.assertEqual(lang.unsupported_warnings(lang.settings(self.cfg(timeout_seconds=60))), [])
+        warnings = lang.unsupported_warnings(lang.settings(self.cfg(workers=4)))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("workers", warnings[0])
+
+
+class DescribeChecks(unittest.TestCase):
+    def test_gremlins_tokens(self):
+        cases = [
+            ("CONDITIONALS_BOUNDARY", "\tif total >= 1000 {", 11, (">=", ">")),
+            ("CONDITIONALS_BOUNDARY", "if kg > 20 {", 7, (">", ">=")),
+            ("CONDITIONALS_NEGATION", "if region == \"x\" {", 11, ("==", "!=")),
+            ("ARITHMETIC_BASE", "return a + b", 10, ("+", "-")),
+            ("ARITHMETIC_BASE", "return a % b", 10, ("%", "*")),
+            ("INVERT_LOGICAL", "if a && b {", 6, ("&&", "||")),
+            ("INVERT_BITWISE", "x := a &^ b", 8, ("&^", "&")),
+            ("INVERT_BITWISE", "x := a << 2", 8, ("<<", ">>")),
+            ("INVERT_BWASSIGN", "x >>= 2", 3, (">>=", "<<=")),
+            ("INVERT_ASSIGNMENTS", "x += 2", 3, ("+=", "-=")),
+            ("INVERT_ASSIGNMENTS", "x %= 2", 3, ("%=", "%=")),  # gremlins 原始碼就是這樣對應
+            ("REMOVE_SELF_ASSIGNMENTS", "x -= 2", 3, ("-=", "=")),
+            ("INCREMENT_DECREMENT", "i++", 2, ("++", "--")),
+            ("INVERT_LOOPCTRL", "\t\tbreak", 3, ("break", "continue")),
+            ("INVERT_NEGATIVES", "y := -x", 6, ("-", "+")),
+        ]
+        for mutator, line, column, expect in cases:
+            self.assertEqual(go.gremlins_describe(mutator, line, column), expect, (mutator, line))
+
+    def test_gremlins_column_counts_bytes(self):
+        line = "if s == \"離島\" || total >= 1 {"
+        column = len("if s == \"離島\" ".encode("utf-8")) + 1
+        self.assertEqual(go.gremlins_describe("INVERT_LOGICAL", line, column), ("||", "&&"))
+
+    def test_gremlins_unknown_gives_none(self):
+        self.assertEqual(go.gremlins_describe("NO_SUCH_TYPE", "a + b", 3), (None, None))
+        self.assertEqual(go.gremlins_describe("ARITHMETIC_BASE", "a + b", None), (None, None))
+        self.assertEqual(go.gremlins_describe("ARITHMETIC_BASE", "a == b", 3), (None, None))
+        self.assertEqual(go.gremlins_describe("ARITHMETIC_BASE", "a", 99), (None, None))
+
+    def test_cosmic_ray_operators(self):
+        f = python.cosmic_ray_replacement
+        self.assertEqual(f("ReplaceBinaryOperator_Add_Sub", 0, "+"), "-")
+        self.assertEqual(f("ReplaceBinaryOperator_FloorDiv_Pow", 0, "//"), "**")
+        self.assertEqual(f("ReplaceComparisonOperator_GtE_Gt", 0, ">="), ">")
+        self.assertEqual(f("ReplaceComparisonOperator_Eq_IsNot", 0, "=="), "is not")
+        self.assertEqual(f("ReplaceUnaryOperator_USub_UAdd", 0, "-"), "+")
+        self.assertEqual(f("ReplaceUnaryOperator_Invert_Not", 0, "~"), "not")
+        self.assertEqual(f("ReplaceUnaryOperator_Delete_Not", 0, "not"), "")
+        self.assertEqual(f("ReplaceTrueWithFalse", 0, "True"), "False")
+        self.assertEqual(f("ReplaceAndWithOr", 0, "and"), "or")
+        self.assertEqual(f("ReplaceBreakWithContinue", 0, "break"), "continue")
+        self.assertEqual(f("ExceptionReplacer", 0, "OSError"), "CosmicRayTestingException")
+        self.assertEqual(f("ZeroIterationForLoop", 0, "range(3)"), "[]")
+        self.assertEqual(f("RemoveDecorator", 0, "@cache"), "")
+        self.assertEqual(f("AddNot", 0, "x > 1"), "not x > 1")
+
+    def test_cosmic_ray_numbers(self):
+        f = python.cosmic_ray_replacement
+        self.assertEqual(f("NumberReplacer", 0, "1000"), "1001")
+        self.assertEqual(f("NumberReplacer", 1, "1000"), "999")
+        self.assertEqual(f("NumberReplacer", 0, "4.2"), "5.2")
+        self.assertEqual(f("NumberReplacer", 1, "0x10"), "15")
+        # occurrence 是整個模組一路數下去：a = 5 / b = 7 的第 2、3 個是 b 的 +1、-1
+        self.assertEqual([f("NumberReplacer", i, "5") for i in (0, 1)], ["6", "4"])
+        self.assertEqual(f("NumberReplacer", 2, "7"), "8")
+        self.assertEqual(f("NumberReplacer", 3, "7"), "6")
+        self.assertEqual(f("NumberReplacer", 0, "1j"), "(1+1j)")
+        self.assertIsNone(f("NumberReplacer", -1, "1"))
+        self.assertIsNone(f("NumberReplacer", 0, "not a number"))
+
+    def test_cosmic_ray_unknown_gives_none(self):
+        f = python.cosmic_ray_replacement
+        for name in ("VariableReplacer", "VariableInserter", "NoOp", "ReplaceBinaryOperator_Add_Nope", "Whatever"):
+            self.assertIsNone(f(name, 0, "x"), name)
+        self.assertIsNone(f("AddNot", 0, None))
+        self.assertIsNone(f("AddNot", 0, "foo(…"))
+
+    def test_describe_text(self):
+        self.assertEqual(mutation.describe(_mutant(original=">=", replacement=">")), "把 `>=` 改成 `>`")
+        self.assertEqual(mutation.describe(_mutant(original="not", replacement="")), "把 `not` 刪掉")
+        self.assertEqual(mutation.describe(_mutant()), "改法 CONDITIONALS_BOUNDARY")
+        self.assertEqual(mutation.describe(_mutant(original=">=", replacement=None)), "改法 CONDITIONALS_BOUNDARY")
+        self.assertEqual(mutation.describe(_mutant(original="{…", replacement="{}")), "把 `{…` 改成 `{}`")
+
+    def test_mutation_text_lines(self):
+        cfg = config.validate({"version": 2, "language": "go"})
+        mutants = [_mutant(original=">=", replacement=">"), _mutant(line=9, status="NOT_COVERED", text="return 60"),
+                   _mutant(line=12, status="KILLED")]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            report.print_mutation_result(mutants, mutation.count(mutants), cfg, go.LANGUAGE().settings(cfg))
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], "沒抓到  a.go:5  把 `>=` 改成 `>`  ｜ if total >= 1000 {")
+        self.assertEqual(lines[1], "測試沒跑到  a.go:9  改法 CONDITIONALS_BOUNDARY  ｜ return 60")
+        self.assertIn("設定：逾時 工具預設、同時跑 工具預設、排除改法 無", lines)
+
+    def test_excluded_and_unused_are_printed(self):
+        cfg = config.validate({"version": 2, "language": "go"})
+        mutants = [_mutant(status="EQUIVALENT"), _mutant(status="EXCLUDED_MUTATOR")]
+        out = io.StringIO()
+        settings = {"timeout_seconds": 60, "workers": 2, "exclude_mutators": ["A", "B"]}
+        with contextlib.redirect_stdout(out):
+            report.print_mutation_result(mutants, mutation.count(mutants), cfg, settings, [_entry()])
+        text = out.getvalue()
+        self.assertIn("已排除：改了也沒差 1", text)
+        self.assertIn("已排除：設定排除的改法 1", text)
+        self.assertIn("設定：逾時 60 秒、同時跑 2、排除改法 A、B", text)
+        self.assertIn("排除清單有 1 項沒用到", text)
+
+    def test_span_text_and_location_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "x.cs")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write("﻿    if (total >= 1000)\n    {\n        return 0;\n    }\n")
+            mutation._source_cache.clear()
+
+            def loc(sl, sc, el, ec):
+                return {"start": {"line": sl, "column": sc}, "end": {"line": el, "column": ec}}
+
+            self.assertEqual(mutation.location_text(path, loc(1, 9, 1, 22)), "total >= 1000")  # 欄位從 1 起算，end 不含
+            self.assertEqual(mutation.location_text(path, loc(2, 5, 4, 6)), "{…")  # 跨行：第一行加「…」
+            self.assertEqual(mutation.span_text(path, (3, 8), (4, 0)), "return 0;")  # 結尾在下一行行首
+            self.assertIsNone(mutation.location_text(path, loc(99, 1, 99, 2)))
+            self.assertIsNone(mutation.location_text(path, {}))
+            self.assertIsNone(mutation.location_text(os.path.join(tmp, "missing.cs"), loc(1, 1, 1, 2)))
+            mutation._source_cache.clear()
 
 
 if __name__ == "__main__":

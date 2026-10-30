@@ -11,8 +11,24 @@ from qtools.proc import QualityError
 MODULES = {"go": "go", "csharp": "csharp", "js": "js", "python": "python"}
 
 
+# 每個語言模組都有自己的 DEFAULTS，格式如下。.quality.json 的 mutation 區塊寫 null 就用它。
+# v2.0.0 的預設值不排除任何改法、不改逾時和並行：這樣分數才能跟 v1 和各 repo 第 0 步的報告比較。
+# 之後要調預設值時，發第二碼版本。
+DEFAULTS = {"timeout_seconds": None, "workers": None, "exclude_mutators": []}
+
+
 class Language:
     SOURCE_GLOBS = []  # git ls-files 的樣式，用來列出這個語言的原始碼
+    DEFAULTS = DEFAULTS
+
+    def settings(self, cfg):
+        """這次實際生效的 {timeout_seconds, workers, exclude_mutators}：設定檔寫 null 的就用語言預設值。"""
+        m = cfg["mutation"]
+        return {k: (self.DEFAULTS[k] if m[k] is None else m[k]) for k in ("timeout_seconds", "workers", "exclude_mutators")}
+
+    def unsupported_warnings(self, settings):
+        """這個語言的量測工具不支援、但設定檔有設的項目，回傳警告訊息串列。"""
+        return []
 
     def __init__(self):
         self.tools = {}  # 這次實際用到的量測工具和版本，寫進 JSON 報告的 tools 欄位

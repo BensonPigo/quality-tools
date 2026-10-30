@@ -73,6 +73,7 @@ REPORT = {
         "reach_rate": Opt(Num),
         "mutants": Lst(MUTANT),
         "packages": Lst({"package": str, "counts": COUNTS, "kill_rate": Opt(Num), "reach_rate": Opt(Num)}),
+        "settings": {"timeout_seconds": Opt(Num), "workers": Opt(int), "exclude_mutators": Lst(str)},
         "unused_equivalents": Lst(dict),
     }),
 }

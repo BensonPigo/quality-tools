@@ -4,12 +4,12 @@ import datetime
 import os
 
 from qtools import crap, mutation
-from qtools.model import KILLED, LIVED, NOT_COVERED, TIMED_OUT
+from qtools.model import EQUIVALENT, EXCLUDED_MUTATOR, KILLED, LIVED, NOT_COVERED, STATUS_NAMES, TIMED_OUT
 from qtools.proc import git
 from qtools.report import pct
 
 
-def write_baseline(funcs, mutants, cfg, lang, out_path):
+def write_baseline(funcs, mutants, cfg, lang, out_path, unused=()):
     threshold = cfg["crap"]["threshold"]
 
     out = []
@@ -49,6 +49,12 @@ def write_baseline(funcs, mutants, cfg, lang, out_path):
             pkg, c[KILLED], c[TIMED_OUT], c[LIVED], c[NOT_COVERED],
             pct(mutation.kill_rate(c)), pct(mutation.reach_rate(c))))
     out.append("")
+    counts = mutation.count(mutants)
+    excluded = ["{} {}".format(STATUS_NAMES[s], counts[s]) for s in (EQUIVALENT, EXCLUDED_MUTATOR) if counts[s]]
+    if excluded:
+        out += ["{}（不算進上表的抓錯率和測到率）。".format("、".join(excluded)), ""]
+    if unused:
+        out += ["排除清單有 {} 項沒用到：那一行的原文或改法已經變了，請重新判斷，或從清單刪掉。".format(len(unused)), ""]
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:

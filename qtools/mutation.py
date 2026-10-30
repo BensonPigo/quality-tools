@@ -7,7 +7,7 @@
 
 from collections import defaultdict
 
-from qtools.model import KILLED, LIVED, NOT_COVERED, STATUSES, TIMED_OUT
+from qtools.model import EXCLUDED_MUTATOR, KILLED, LIVED, NOT_COVERED, STATUSES, TIMED_OUT
 
 
 def count(mutants):
@@ -52,16 +52,76 @@ def by_package(mutants, group):
     return {p: count(ms) for p, ms in packages.items()}
 
 
+_source_cache = {}
+
+
+def source_lines(file):
+    """檔案的每一行（不含換行字元），讀過的檔案會快取。檔案不見了（例如被刪掉）回傳空串列。"""
+    if file not in _source_cache:
+        try:
+            # utf-8-sig：檔案開頭有 BOM 時，第一行的欄位位置才跟工具回報的對得上
+            with open(file, encoding="utf-8-sig", errors="replace") as f:
+                _source_cache[file] = f.read().splitlines()
+        except OSError:
+            _source_cache[file] = []
+    return _source_cache[file]
+
+
 def fill_line_text(mutants):
     """填入每個改壞版本所在那一行的原文（去頭尾空白）。"""
-    cache = {}
     for m in mutants:
-        if m.file not in cache:
-            try:
-                with open(m.file, encoding="utf-8", errors="replace") as f:
-                    cache[m.file] = f.read().splitlines()
-            except OSError:  # 檔案被刪掉
-                cache[m.file] = []
-        lines = cache[m.file]
+        lines = source_lines(m.file)
         m.line_text = lines[m.line - 1].strip() if 0 < m.line <= len(lines) else ""
     return mutants
+
+
+def span_text(file, start, end):
+    """原始檔裡 start 到 end 之間的文字，位置是 (行, 欄)，行從 1 起算，欄從 0 起算，end 不含。
+
+    跨行時只取第一行，結尾加「…」。讀不到（檔案不見、位置超出）回傳 None。
+    """
+    lines = source_lines(file)
+    (sl, sc), (el, ec) = start, end
+    if not 0 < sl <= len(lines) or el < sl:
+        return None
+    first = lines[sl - 1]
+    if el == sl:
+        text = first[sc:ec]
+    elif el == sl + 1 and ec == 0:  # 結尾落在下一行行首，等於包含這一行的換行字元
+        text = first[sc:]
+    else:
+        return first[sc:] + "…"
+    return text if text else None
+
+
+def location_text(file, location):
+    """Stryker 系列（Stryker.NET、StrykerJS）報告的 location 對應的原文。報告的行、欄都從 1 起算，end 不含。"""
+    try:
+        start, end = location["start"], location["end"]
+        return span_text(file, (start["line"], start["column"] - 1), (end["line"], end["column"] - 1))
+    except (KeyError, TypeError):
+        return None
+
+
+def exclude_mutators(mutants, names):
+    """名稱在 names 裡的改壞版本一律標成 EXCLUDED_MUTATOR，不看原本的狀態。名稱用各工具報告裡的名稱。"""
+    names = set(names)
+    for m in mutants:
+        if m.mutator in names:
+            m.status = EXCLUDED_MUTATOR
+    return mutants
+
+
+def describe(m):
+    """一個改壞版本改了什麼，例如「把 `>=` 改成 `>`」。取不到改成什麼時，退回「改法 名稱」。"""
+    if m.replacement is None or not m.original:
+        return "改法 " + m.mutator
+    if m.replacement == "":
+        return "把 `{}` 刪掉".format(_one_line(m.original))
+    return "把 `{}` 改成 `{}`".format(_one_line(m.original), _one_line(m.replacement))
+
+
+def _one_line(text):
+    """多行的文字只取第一行，結尾加「…」。"""
+    lines = text.splitlines()
+    return lines[0] + "…" if len(lines) > 1 else text

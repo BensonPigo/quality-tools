@@ -134,10 +134,11 @@ def _number(v):
 
 # ---------- migrate：v1 → v2 ----------
 
-def migrate_config(v1):
+def migrate_config(v1, notes=None):
     """v1 設定（dict）轉成 v2（dict）。每個有預設值的門檻都明寫出來，轉換後的判定結果跟 v1 一樣。
 
     v1 沒寫 mutant_coverage_threshold 時，實際行為是 0（不擋），所以照搬 0，不自動調成 v2 新設定檔的 50。
+    notes 給了就把轉換時略過的鍵寫進去（字串串列），由呼叫端印給使用者看。
     """
     if "version" in v1:
         raise QualityError("{} 已經是 v2 格式".format(CONFIG_FILE))
@@ -153,7 +154,11 @@ def migrate_config(v1):
         "reach_rate_threshold": v1.get("mutant_coverage_threshold", 0),
     }
     if "python_mutant_timeout" in v1:
-        mutation["timeout_seconds"] = v1["python_mutant_timeout"]
+        # v1 只有 Python 讀這個鍵；其他語言原本就沒作用，轉成 timeout_seconds 會讓 C#、JS 的行為悄悄改變
+        if v1["language"] == "python":
+            mutation["timeout_seconds"] = v1["python_mutant_timeout"]
+        elif notes is not None:
+            notes.append("python_mutant_timeout：這個鍵只對 Python 有效，已略過")
     v2 = {
         "version": 2,
         "language": v1["language"],
@@ -182,11 +187,12 @@ def migrate_file(path=CONFIG_FILE):
         raise QualityError("{} 不是合法的 JSON：{}".format(path, e))
     if not isinstance(v1, dict):
         raise QualityError("{} 的最外層必須是物件".format(path))
-    new_text = _dumps(migrate_config(v1))
+    notes = []
+    new_text = _dumps(migrate_config(v1, notes))
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(new_text)
-    return "".join(difflib.unified_diff(old_text.splitlines(True), new_text.splitlines(True),
-                                        "舊（v1）", "新（v2）"))
+    diff = "".join(difflib.unified_diff(old_text.splitlines(True), new_text.splitlines(True), "舊（v1）", "新（v2）"))
+    return diff + "".join(n + "\n" for n in notes)
 
 
 def _dumps(data):

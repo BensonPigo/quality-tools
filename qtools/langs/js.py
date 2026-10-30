@@ -17,13 +17,17 @@ import subprocess
 import sys
 import tempfile
 
+from qtools.langs.base import DEFAULTS as BASE_DEFAULTS
 from qtools.langs.base import Language, check_version
 from qtools.model import Function, LIVED, KILLED, NOT_COVERED, NOT_VIABLE, SKIPPED, TIMED_OUT, Mutant
+from qtools.mutation import location_text
 from qtools.proc import (TOOL_ROOT, QualityError, is_excluded, list_files, normalize, project_path, run, tail,
                          tools_dir)
 
 TYPESCRIPT_VERSION = "5.9.3"  # 只用來解析原始碼。TypeScript 7 改用 Go 重寫，原本的 JavaScript API 不一定還在
 COMPLEXITY_JS = os.path.join(TOOL_ROOT, "js", "complexity.cjs")
+
+DEFAULTS = dict(BASE_DEFAULTS)  # 不排除任何改法，逾時和並行用 StrykerJS 自己的預設
 
 # 各 repo 自己安裝的 StrykerJS（core 和測試框架的 runner 版本要一致），這幾個版本跑過 selftest，分數對得上
 STRYKER_VERIFIED = ["10.0.0", "10.1.1"]
@@ -39,6 +43,7 @@ _NOT_SOURCE = re.compile(r"(\.d\.[cm]?ts$)|((^|/)[^/]*\.config\.[cm]?[jt]s$)|((^
 
 class Js(Language):
     SOURCE_GLOBS = ["*.js", "*.jsx", "*.mjs", "*.cjs", "*.ts", "*.tsx", "*.mts", "*.cts"]
+    DEFAULTS = DEFAULTS
 
     def is_test(self, path):
         return _TEST.search(normalize(path)) is not None
@@ -91,6 +96,7 @@ class Js(Language):
         if dirs is None:
             dirs = list(packages)
         sources = files if files is not None else self._source_files(cfg)
+        settings = self.settings(cfg)
 
         mutants = []
         for d in sorted(dirs):
@@ -105,13 +111,7 @@ class Js(Language):
                 report = os.path.join(tmp, "mutation.json")
                 config = os.path.join(tmp, "stryker.config.json")
                 with open(config, "w", encoding="utf-8") as fp:
-                    json.dump({
-                        "testRunner": runner,
-                        "reporters": ["json"],
-                        "jsonReporter": {"fileName": report},
-                        "mutate": mutate,
-                        "coverageAnalysis": "perTest",
-                    }, fp)
+                    json.dump(stryker_options(runner, report, mutate, settings), fp)
                 r = run(["node", stryker, "run", config], cwd=d)
                 if not os.path.exists(report):
                     raise QualityError("StrykerJS 執行失敗（{}）：\n{}".format(d, tail(r.stdout + r.stderr)))
@@ -127,6 +127,8 @@ class Js(Language):
                         column=m["location"]["start"].get("column"),
                         status=STATUS.get(m["status"], SKIPPED),
                         mutator=m["mutatorName"],
+                        original=location_text(file, m["location"]),
+                        replacement=m.get("replacement"),
                     ))
         return mutants
 
@@ -165,6 +167,30 @@ class Js(Language):
 
 
 LANGUAGE = Js
+
+
+def stryker_options(runner, report, mutate, settings):
+    """StrykerJS 設定檔的內容。設定的值是 null 的項目不放進去，維持 StrykerJS 自己的預設。
+
+    鍵名和意義查自專案裝的 @stryker-mutator/core 10.x 的 schema/stryker-schema.json：
+    timeoutMS（毫秒，加在每個改壞版本依正常測試時間算出的時限之外）、concurrency（同時跑幾個 worker）、
+    mutator.excludedMutations（改法名稱，跟報告裡的 mutatorName 一致）。
+    StrykerJS 是唯一在工具端排除改法的語言，改壞版本不用跑，省時間；核心仍會依名稱標記報告裡看得到的那些。
+    """
+    options = {
+        "testRunner": runner,
+        "reporters": ["json"],
+        "jsonReporter": {"fileName": report},
+        "mutate": mutate,
+        "coverageAnalysis": "perTest",
+    }
+    if settings["timeout_seconds"] is not None:
+        options["timeoutMS"] = int(round(settings["timeout_seconds"] * 1000))
+    if settings["workers"] is not None:
+        options["concurrency"] = settings["workers"]
+    if settings["exclude_mutators"]:
+        options["mutator"] = {"excludedMutations": list(settings["exclude_mutators"])}
+    return options
 
 
 def check_stryker(core_version, runner_version, runner, vitest_version=None):

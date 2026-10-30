@@ -13,7 +13,7 @@
       ]
     },
     {
-      "name": "沒改東西：變異測試通過",
+      "name": "沒改東西：抓錯檢查通過",
       "run": [
         "mutation",
         "--base",
@@ -85,6 +85,7 @@
       "exit": 1,
       "contains": [
         "沒抓到",
+        "改成",
         "FAIL："
       ]
     },
@@ -191,6 +192,51 @@
           ],
           "exit": 0,
           "json": "out-mut.json"
+        }
+      ]
+    },
+    {
+      "name": "設定 workers 和 timeout_seconds：照常量測，設定寫進 JSON，專案裡不留 Stryker 設定檔",
+      "edits": [
+        {
+          "file": "src/Shop/Shipping/Fee.cs",
+          "old": "if (total >= 1000)",
+          "new": "if (total >= 999)"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0,\n    \"timeout_seconds\": 60,\n    \"workers\": 2"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main",
+            "--json",
+            "out-mut.json"
+          ],
+          "exit": [
+            0,
+            1
+          ],
+          "contains": [
+            "設定：逾時 60 秒、同時跑 2"
+          ],
+          "json": "out-mut.json",
+          "json_values": {
+            "mutation.settings": {
+              "timeout_seconds": 60,
+              "workers": 2,
+              "exclude_mutators": []
+            }
+          },
+          "no_files": [
+            "stryker-config*",
+            "stryker.config*"
+          ]
         }
       ]
     }

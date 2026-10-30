@@ -18,7 +18,7 @@ import argparse
 import os
 import sys
 
-from qtools import baseline, changes, config, crap, mutation, report
+from qtools import baseline, changes, config, crap, equivalents, mutation, report
 from qtools.langs.base import load_language
 from qtools.model import KILLED, LIVED, NOT_COVERED, TIMED_OUT
 from qtools.proc import QualityError, git
@@ -100,23 +100,26 @@ def cmd_crap(args, cfg, lang):
 # ---------- 第三關：抓錯檢查 ----------
 
 def cmd_mutation(args, cfg, lang):
+    entries = equivalents.load(cfg["mutation"]["equivalents_file"])
+    settings = lang.settings(cfg)
     if args.base:
         changed = changes.changed_lines(args.base, lang, cfg)
         prod = {f: s for f, s in changed.items() if not lang.is_test(f)}
         if not prod:
-            mutants = []
             print("PASS：這次沒有改到正式程式碼")
-            return _finish_mutation(args, cfg, lang, mutants, [])
+            return _finish_mutation(args, cfg, lang, settings, [], [])
         dirs = sorted({lang.package_dir(f) for f in prod})
-        mutants = [m for m in lang.measure_mutants(cfg, dirs, sorted(prod))
-                   if changes.overlaps(prod.get(m.file), m.line, m.line)]
+        measured = lang.measure_mutants(cfg, dirs, sorted(prod))
+        mutants = [m for m in measured if changes.overlaps(prod.get(m.file), m.line, m.line)]
+        scope = set(prod)
         print("只計算和 {} 相比有改到的行\n".format(args.base))
     else:
-        mutants = lang.measure_mutants(cfg)
+        measured = mutants = lang.measure_mutants(cfg)
+        scope = None
 
-    mutation.fill_line_text(mutants)
+    unused = classify(measured, mutants, settings, entries, scope)
     counts = mutation.count(mutants)
-    report.print_mutation_result(mutants, counts, cfg)
+    report.print_mutation_result(mutants, counts, cfg, settings, unused)
 
     problems = mutation.judge(counts, cfg)
     print()
@@ -127,25 +130,38 @@ def cmd_mutation(args, cfg, lang):
             print("PASS：改到的行沒有量到改壞的版本（沒有可以改的地方，或是所在的專案沒有測試，請看上方訊息）")
         else:
             print("PASS")
-    return _finish_mutation(args, cfg, lang, mutants, problems)
+    return _finish_mutation(args, cfg, lang, settings, mutants, problems, unused)
 
 
-def _finish_mutation(args, cfg, lang, mutants, problems):
+def classify(measured, mutants, settings, entries, scope):
+    """填入行原文，再依序做兩件事：設定排除的改法（EXCLUDED_MUTATOR）、排除清單比對（EQUIVALENT）。
+
+    measured 是量到的全部改壞版本，mutants 是其中這次要計算的（用 --base 時只有改到的行）。排除清單有沒有用到
+    要看全部量到的，所以兩者都標記，回傳排除清單裡沒用到的項目。
+    """
+    mutation.fill_line_text(measured)
+    mutation.exclude_mutators(measured, settings["exclude_mutators"])
+    return equivalents.apply(mutants, entries, measured, scope)
+
+
+def _finish_mutation(args, cfg, lang, settings, mutants, problems, unused=()):
     if args.json:
         counts = mutation.count(mutants)
         report.write_json(args.json, report.build_report(
             "mutation", cfg, lang, args.base, _commit(), not problems,
-            mutation_part=report.mutation_json(mutants, counts, cfg, lang.report_group)))
+            mutation_part=report.mutation_json(mutants, counts, cfg, lang.report_group, settings, unused)))
     return 1 if problems else 0
 
 
 # ---------- 量現況 ----------
 
 def cmd_baseline(args, cfg, lang):
+    entries = equivalents.load(cfg["mutation"]["equivalents_file"])
     funcs = crap.score_functions(lang.measure_functions(cfg))
-    mutants = mutation.fill_line_text(lang.measure_mutants(cfg))
+    mutants = lang.measure_mutants(cfg)
+    unused = classify(mutants, mutants, lang.settings(cfg), entries, None)
     out = args.out or cfg["baseline"]["out"]
-    baseline.write_baseline(funcs, mutants, cfg, lang, out)
+    baseline.write_baseline(funcs, mutants, cfg, lang, out, unused)
     print("已寫入 " + out)
     return 0
 

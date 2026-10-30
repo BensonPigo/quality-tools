@@ -22,14 +22,17 @@
 所有情境都在這個狀態下跑。selftest.py 一開始會先跑 dev/unit_checks.py（不需要語言工具的純函式測試），沒過就整體失敗。
 
 情境（scenarios）可以用 run + exit + contains 寫單一步驟，也可以用 steps 寫多個步驟。每一步是
-{run, exit, contains, not_contains, json}：同一個情境的各步之間不還原工作目錄；json 是該步 --json 寫出的檔名，
-讀檔後用 qtools.report_schema.validate 比對，不符就算該步失敗。run 的第一個元素是 {venv_python} 時，
-直接執行範例 venv 的 Python，不經過 quality.py。
+{run, exit, contains, not_contains, json, json_values, no_files}：同一個情境的各步之間不還原工作目錄；
+exit 可以是一個數字，也可以是可接受的數字串列（例如 [0, 1]）；json 是該步 --json 寫出的檔名，
+讀檔後用 qtools.report_schema.validate 比對，不符就算該步失敗；json_values 是 {"欄位.路徑": 預期值}，
+比對 json 檔裡對應欄位的值；no_files 是檔名樣式（fnmatch）的串列，這一步結束後範例專案裡不能有符合的檔案。
+run 的第一個元素是 {venv_python} 時，直接執行範例 venv 的 Python，不經過 quality.py。
 
 範例專案需要的語言工具（Go、.NET SDK、Node、Python）要先裝好。
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import shutil
@@ -136,7 +139,8 @@ def run_sample(name, args):
                 for i, step in enumerate(steps, 1):
                     title = sc["name"] if len(steps) == 1 else "{}（步驟 {}）".format(sc["name"], i)
                     failed += check(title, proj, step["run"], step["exit"], step.get("contains", []),
-                                    step.get("not_contains", []), step.get("json"))
+                                    step.get("not_contains", []), step.get("json"), step.get("json_values"),
+                                    step.get("no_files") or ())
     finally:
         if args.keep:
             print("  暫存目錄：" + proj)
@@ -235,7 +239,7 @@ def crap_table(stdout):
     return "".join(lines[start:])
 
 
-def check(title, proj, cmd, code, contains=(), not_contains=(), json_file=None):
+def check(title, proj, cmd, code, contains=(), not_contains=(), json_file=None, json_values=None, no_files=()):
     if cmd and cmd[0] == "{venv_python}":
         r = run([os.path.join(proj, VENV_PYTHON)] + cmd[1:], proj)
     else:
@@ -244,25 +248,45 @@ def check(title, proj, cmd, code, contains=(), not_contains=(), json_file=None):
     missing = [c for c in contains if c not in output]
     unexpected = [c for c in not_contains if c in output]
     problems = []
-    if r.returncode != code:
-        problems.append("結束碼 {}（預期 {}）".format(r.returncode, code))
+    codes = code if isinstance(code, list) else [code]
+    if r.returncode not in codes:
+        problems.append("結束碼 {}（預期 {}）".format(r.returncode, " 或 ".join(map(str, codes))))
     if missing:
         problems.append("輸出缺少：" + "、".join(missing))
     if unexpected:
         problems.append("輸出不該出現：" + "、".join(unexpected))
     if json_file:
-        problems += _json_problems(os.path.join(proj, json_file), json_file)
+        problems += _json_problems(os.path.join(proj, json_file), json_file, json_values or {})
+    problems += _leftover_files(proj, no_files)
     return report(title, r, not problems, "；".join(problems))
 
 
-def _json_problems(path, name):
-    """讀 --json 寫出的檔案，用 report_schema 比對格式。"""
+def _json_problems(path, name, values):
+    """讀 --json 寫出的檔案，用 report_schema 比對格式，再比對 values 指定的欄位值。"""
     from qtools import report_schema
     if not os.path.exists(path):
         return ["沒有寫出 " + name]
     with open(path, encoding="utf-8") as fp:
         data = json.load(fp)
-    return ["{} 格式不符：{}".format(name, e) for e in report_schema.validate(data)]
+    problems = ["{} 格式不符：{}".format(name, e) for e in report_schema.validate(data)]
+    for dotted, expected in values.items():
+        actual = data
+        for key in dotted.split("."):
+            actual = actual.get(key) if isinstance(actual, dict) else None
+        if actual != expected:
+            problems.append("{} 的 {} 是 {!r}（預期 {!r}）".format(name, dotted, actual, expected))
+    return problems
+
+
+def _leftover_files(proj, patterns):
+    """專案裡（不含 .git、node_modules）符合樣式的檔案，用來確認工具沒有留下自己產生的設定檔。"""
+    found = []
+    for root, dirs, names in os.walk(proj):
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules")]
+        for n in names:
+            if any(fnmatch.fnmatch(n, p) for p in patterns):
+                found.append(normalize(os.path.relpath(os.path.join(root, n), proj)))
+    return ["專案裡多出不該留下的檔案：" + "、".join(found)] if found else []
 
 
 def report(title, r, ok, detail):

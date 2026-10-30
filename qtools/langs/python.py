@@ -18,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 
+from qtools.langs.base import DEFAULTS as BASE_DEFAULTS
 from qtools.langs.base import Language, check_version
 from qtools.model import Function, KILLED, LIVED, NOT_COVERED, NOT_VIABLE, SKIPPED, Mutant
+from qtools.mutation import span_text
 from qtools.proc import TOOL_ROOT, QualityError, is_excluded, list_files, normalize, project_path, run, tail
 
 SKIP_FILTER = os.path.join(TOOL_ROOT, "python", "cr_skip_uncovered.py")
@@ -30,9 +32,35 @@ DEFAULT_TIMEOUT = 30  # cosmic-ray 每個突變體的時限（秒）
 # 各 repo 自己安裝的 cosmic-ray，這個版本跑過 selftest，分數對得上
 COSMIC_RAY_VERIFIED = ["8.7.0"]
 
+DEFAULTS = dict(BASE_DEFAULTS, timeout_seconds=DEFAULT_TIMEOUT)  # 逾時 30 秒同 v1，JSON 報的是實際生效的值；不排除任何改法
+
+# 下面幾張表抄自 cosmic-ray 8.7.0 原始碼（範例專案 venv 裡的 cosmic_ray/operators/）：
+#   binary_operator_replacement.py      BinaryOperators：ReplaceBinaryOperator_<A>_<B>
+#   comparison_operator_replacement.py  ComparisonOperators：ReplaceComparisonOperator_<A>_<B>
+#   unary_operator_replacement.py       UnaryOperators：ReplaceUnaryOperator_<A>_<B>，刪掉運算子是 _Delete_<A>
+#   boolean_replacer.py、break_continue.py  關鍵字互換的類別名稱
+# 報告裡的 operator_name 是 core/<類別名稱>（加上這幾個檔案用 extend_name 接上去的後綴），符號是它們的 Enum 值。
+BINARY_OPS = {"Add": "+", "Sub": "-", "Mul": "*", "Div": "/", "FloorDiv": "//", "Mod": "%", "Pow": "**",
+              "RShift": ">>", "LShift": "<<", "BitOr": "|", "BitAnd": "&", "BitXor": "^"}
+COMPARISON_OPS = {"Eq": "==", "NotEq": "!=", "Lt": "<", "LtE": "<=", "Gt": ">", "GtE": ">=",
+                  "Is": "is", "IsNot": "is not"}
+UNARY_OPS = {"UAdd": "+", "USub": "-", "Invert": "~", "Not": "not"}  # 原始碼裡 Not 的值是 "not "，顯示時不帶空白
+KEYWORD_SWAPS = {"ReplaceTrueWithFalse": "False", "ReplaceFalseWithTrue": "True",
+                 "ReplaceAndWithOr": "or", "ReplaceOrWithAnd": "and",
+                 "ReplaceBreakWithContinue": "continue", "ReplaceContinueWithBreak": "break"}
+NUMBER_OFFSETS = [+1, -1]  # number_replacer.py 的 OFFSETS：同一個數字依序產生加 1、減 1 兩個改壞版本；
+# cosmic-ray 的 occurrence 是整個模組一路數下去（mutating.py），所以用 occurrence % 2 判斷是哪一個
+EXCEPTION_NAME = "CosmicRayTestingException"  # exception_replacer.py 把 except 的例外名稱換成它
+
 
 class Python(Language):
     SOURCE_GLOBS = ["*.py"]
+    DEFAULTS = DEFAULTS
+
+    def unsupported_warnings(self, settings):
+        if settings["workers"] is not None:
+            return ["警告：Python 的量測工具（cosmic-ray）在這裡只用單一 worker，不支援 workers，這個設定沒有作用"]
+        return []
 
     def is_test(self, path):
         path = normalize(path)
@@ -73,6 +101,9 @@ class Python(Language):
         if not files:
             return []
 
+        settings = self.settings(cfg)
+        for w in self.unsupported_warnings(settings):
+            print(w, file=sys.stderr, flush=True)
         self.tools["cosmic-ray"] = _check_cosmic_ray(python)
         executed, _ = _coverage(cfg)
 
@@ -85,13 +116,7 @@ class Python(Language):
 
             config = os.path.join(tmp, "cosmic-ray.toml")
             with open(config, "w", encoding="utf-8") as fp:
-                fp.write("[cosmic-ray]\n")
-                fp.write("module-path = [{}]\n".format(", ".join(_toml(f) for f in files)))
-                fp.write("timeout = {}\n".format(float(cfg["mutation"]["timeout_seconds"] or DEFAULT_TIMEOUT)))
-                fp.write("excluded-modules = []\n")
-                # TOML 單引號字串不處理跳脫字元，Windows 路徑可以直接放
-                fp.write("test-command = '\"{}\" {} -x'\n".format(python, " ".join(PYTEST)))
-                fp.write('\n[cosmic-ray.distributor]\nname = "local"\n')
+                fp.write(cosmic_ray_config(files, python, settings))
             executed_json = os.path.join(tmp, "executed.json")
             with open(executed_json, "w", encoding="utf-8") as fp:
                 json.dump({k: sorted(v) for k, v in executed.items()}, fp)
@@ -111,12 +136,16 @@ class Python(Language):
         for line in r.stdout.splitlines():
             item, result = json.loads(line)
             m = item["mutations"][0]
+            file, name = normalize(m["module_path"]), m["operator_name"].replace("core/", "")
+            original = span_text(file, tuple(m["start_pos"]), tuple(m["end_pos"]))  # 位置：行從 1 起算、欄從 0 起算
             mutants.append(Mutant(
-                file=normalize(m["module_path"]),
+                file=file,
                 line=m["start_pos"][0],
                 column=m["start_pos"][1] + 1,  # cosmic-ray 的欄位從 0 起算，這裡統一成從 1 起算
                 status=_status(result),
-                mutator=m["operator_name"].replace("core/", ""),
+                mutator=name,
+                original=original,
+                replacement=cosmic_ray_replacement(name, m.get("occurrence", 0), original),
             ))
         return mutants
 
@@ -125,6 +154,56 @@ class Python(Language):
 
 
 LANGUAGE = Python
+
+
+def cosmic_ray_config(files, python, settings):
+    """cosmic-ray 的 TOML 設定檔內容。settings 的 timeout_seconds 就是每個改壞版本的總時限（秒）。"""
+    return (
+        "[cosmic-ray]\n"
+        "module-path = [{}]\n"
+        "timeout = {}\n"
+        "excluded-modules = []\n"
+        # TOML 單引號字串不處理跳脫字元，Windows 路徑可以直接放
+        "test-command = '\"{}\" {} -x'\n"
+        "\n[cosmic-ray.distributor]\nname = \"local\"\n"
+    ).format(", ".join(_toml(f) for f in files), float(settings["timeout_seconds"] or DEFAULT_TIMEOUT),
+             python, " ".join(PYTEST))
+
+
+def cosmic_ray_replacement(name, occurrence, original):
+    """依 operator 名稱算出改成什麼，算不出來（例如 VariableReplacer 的結果是隨機的）回傳 None。
+
+    original 是原始檔裡被改掉的那段文字（可能是 None，或跨行時只有第一行加「…」）。
+    """
+    kind, _, rest = name.partition("_")
+    parts = rest.split("_")
+    try:
+        if kind == "ReplaceBinaryOperator":
+            return BINARY_OPS[parts[1]]
+        if kind == "ReplaceComparisonOperator":
+            return COMPARISON_OPS[parts[1]]
+        if kind == "ReplaceUnaryOperator":
+            return "" if parts[0] == "Delete" else UNARY_OPS[parts[1]]
+    except (KeyError, IndexError):
+        return None
+    if name in KEYWORD_SWAPS:
+        return KEYWORD_SWAPS[name]
+    if name == "ExceptionReplacer":
+        return EXCEPTION_NAME
+    if name == "ZeroIterationForLoop":
+        return "[]"
+    if name == "RemoveDecorator":
+        return ""
+    if original is None or original.endswith("…"):  # 下面幾種都要用到完整的原文
+        return None
+    if name == "AddNot":
+        return "not " + original
+    if name == "NumberReplacer" and occurrence >= 0:
+        try:
+            return str(ast.literal_eval(original) + NUMBER_OFFSETS[occurrence % len(NUMBER_OFFSETS)])
+        except (ValueError, SyntaxError, TypeError):
+            return None
+    return None
 
 
 def check_cosmic_ray(version):

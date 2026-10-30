@@ -3,7 +3,7 @@
 import json
 
 from qtools import __version__, crap, mutation
-from qtools.model import KILLED, LIVED, NOT_COVERED, STATUS_NAMES, TIMED_OUT
+from qtools.model import EQUIVALENT, EXCLUDED_MUTATOR, KILLED, LIVED, NOT_COVERED, STATUS_NAMES, TIMED_OUT
 from qtools.report_schema import SCHEMA_VERSION
 
 
@@ -45,23 +45,41 @@ def crap_json(funcs, threshold, untouched_over):
 
 # ---------- 抓錯檢查 ----------
 
-def print_mutation_result(mutants, counts, cfg):
-    """列出沒抓到和測試沒跑到的改壞版本，加上計數、抓錯率和測到率。"""
+def print_mutation_result(mutants, counts, cfg, settings, unused=()):
+    """列出沒抓到和測試沒跑到的改壞版本，加上計數、抓錯率、測到率、這次用的設定、排除清單沒用到的項目。"""
     for m in sorted(mutants, key=lambda m: (m.file, m.line)):
         if m.status in (LIVED, NOT_COVERED):
-            print("{:<12} {:<24} {}:{}  {}".format(
-                STATUS_NAMES[m.status].split("（")[0], m.mutator, m.file, m.line, m.line_text))
+            print("{}  {}:{}  {}  ｜ {}".format(
+                STATUS_NAMES[m.status].split("（")[0], m.file, m.line, mutation.describe(m), m.line_text))
 
     k = cfg["mutation"]["kill_rate_threshold"]
     r = cfg["mutation"]["reach_rate_threshold"]
     print()
     print("抓到 {}、逾時 {}（算抓到）、沒抓到 {}、測試沒跑到 {}".format(
         counts[KILLED], counts[TIMED_OUT], counts[LIVED], counts[NOT_COVERED]))
+    excluded = ["{} {}".format(STATUS_NAMES[s], counts[s]) for s in (EQUIVALENT, EXCLUDED_MUTATOR) if counts[s]]
+    if excluded:
+        print("、".join(excluded) + "（不算進抓錯率和測到率）")
     print("抓錯率：{}（門檻 {}%）".format(pct(mutation.kill_rate(counts)), k))
     print("測到率：{}（門檻 {}%）".format(pct(mutation.reach_rate(counts)), r))
+    print(settings_line(settings))
+    if unused:
+        print()
+        print("排除清單有 {} 項沒用到（那一行的原文或改法已經變了，請重新判斷，或從清單刪掉）：".format(len(unused)))
+        for e in unused:
+            print("  {}  {}  {}".format(e["file"], e["mutator"], e["line_text"]))
 
 
-def mutation_json(mutants, counts, cfg, group):
+def settings_line(settings):
+    """「設定：逾時 …、同時跑 …、排除改法 …」。沒設的項目寫「工具預設」。"""
+    timeout, workers, names = settings["timeout_seconds"], settings["workers"], settings["exclude_mutators"]
+    return "設定：逾時 {}、同時跑 {}、排除改法 {}".format(
+        "工具預設" if timeout is None else "{:g} 秒".format(timeout),
+        "工具預設" if workers is None else workers,
+        "、".join(names) if names else "無")
+
+
+def mutation_json(mutants, counts, cfg, group, settings, unused=()):
     m = cfg["mutation"]
     items = [{
         "file": x.file, "line": x.line, "column": x.column, "function": None, "mutator": x.mutator,
@@ -77,7 +95,9 @@ def mutation_json(mutants, counts, cfg, group):
         "reach_rate": mutation.reach_rate(counts),
         "mutants": items,
         "packages": packages,
-        "unused_equivalents": [],  # 排除清單比對由 S2 加入
+        "settings": {"timeout_seconds": settings["timeout_seconds"], "workers": settings["workers"],
+                     "exclude_mutators": list(settings["exclude_mutators"])},
+        "unused_equivalents": list(unused),
     }
 
 

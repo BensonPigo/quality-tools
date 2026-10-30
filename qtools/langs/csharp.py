@@ -19,13 +19,17 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 
+from qtools.langs.base import DEFAULTS as BASE_DEFAULTS
 from qtools.langs.base import Language
 from qtools.model import Function, LIVED, KILLED, NOT_COVERED, NOT_VIABLE, SKIPPED, TIMED_OUT, Mutant
+from qtools.mutation import location_text
 from qtools.proc import (TOOL_ROOT, QualityError, is_excluded, list_files, normalize, project_path, run, tail,
                          tools_dir)
 
 STRYKER_VERSION = "5.0.0"
 CSMETRICS_SRC = os.path.join(TOOL_ROOT, "dotnet", "CsMetrics")
+
+DEFAULTS = dict(BASE_DEFAULTS)  # 不排除任何改法，逾時和並行用 Stryker.NET 自己的預設
 
 # Stryker 的狀態對應到共用格式
 STATUS = {
@@ -36,6 +40,7 @@ STATUS = {
 
 class CSharp(Language):
     SOURCE_GLOBS = ["*.cs"]
+    DEFAULTS = DEFAULTS
 
     def is_test(self, path):
         project = _projects().get(self.package_dir(path))
@@ -79,6 +84,7 @@ class CSharp(Language):
         if dirs is None:
             dirs = [d for d, p in projects.items() if not p["test"] and not is_excluded(d + "/", cfg)]
 
+        settings = self.settings(cfg)
         mutants = []
         for d in sorted(dirs):
             project = projects.get(d)
@@ -90,15 +96,20 @@ class CSharp(Language):
                 continue
 
             print("抓錯檢查：{} ...".format(d), file=sys.stderr, flush=True)
+            # 設定檔和報告都放在暫存目錄，離開 with 就整個刪掉，不會留在專案裡
             with tempfile.TemporaryDirectory() as tmp:
-                args = [_stryker(), "--project", os.path.basename(project["file"]),
-                        "--reporter", "json", "--output", tmp, "--skip-version-check"]
+                config_file = None
+                if settings["timeout_seconds"] is not None:
+                    config_file = os.path.join(tmp, "stryker-config.json")
+                    with open(config_file, "w", encoding="utf-8") as fp:
+                        json.dump(stryker_config(settings), fp)
+                args = stryker_args(settings, os.path.basename(project["file"]), tmp, config_file)
                 for t in tests:
                     args += ["--test-project", os.path.relpath(t, d)]
                 for f in files or []:
                     if self.package_dir(f) == d:
                         args += ["--mutate", normalize(os.path.relpath(f, d))]
-                r = run(args, cwd=d)
+                r = run([_stryker()] + args, cwd=d)
                 report = os.path.join(tmp, "reports", "mutation-report.json")
                 if not os.path.exists(report):
                     raise QualityError("Stryker 執行失敗（{}）：\n{}".format(d, tail(r.stdout + r.stderr)))
@@ -109,17 +120,45 @@ class CSharp(Language):
             for path, info in result["files"].items():
                 file = project_path(path)
                 for m in info["mutants"]:
+                    start = m["location"]["start"]
                     mutants.append(Mutant(
                         file=file,
-                        line=m["location"]["start"]["line"],
-                        column=m["location"]["start"].get("column"),
+                        line=start["line"],
+                        column=start.get("column"),
                         status=STATUS.get(m["status"], SKIPPED),
                         mutator=m["mutatorName"],
+                        original=location_text(file, m["location"]),
+                        replacement=m.get("replacement"),
                     ))
         return mutants
 
 
 LANGUAGE = CSharp
+
+
+def stryker_config(settings):
+    """Stryker.NET 設定檔的內容，只放命令列沒有的選項。
+
+    additional-timeout 單位是毫秒，加在每個改壞版本「依初始測試時間算出的時限」之外。鍵名和最外層的
+    "stryker-config" 物件來自 Stryker.NET 5.0.0：dotnet-stryker.exe 的 Stryker.Configuration.dll 有
+    AdditionalTimeoutInput，Stryker.CLI.dll 要求設定檔「must contain a single "stryker-config" root object」；
+    --help 沒有這個選項，所以只能走設定檔。用 -V debug 實測過，設定檔裡的值會出現在 "AdditionalTimeout"。
+    """
+    return {"stryker-config": {"additional-timeout": int(round(settings["timeout_seconds"] * 1000))}}
+
+
+def stryker_args(settings, project_file, output_dir, config_file=None):
+    """dotnet-stryker 的命令列參數（不含執行檔，--test-project 和 --mutate 由呼叫端加）。
+
+    --config-file 的說明寫「相對於目前工作目錄」，但 Windows 上暫存目錄和專案可能在不同磁碟，算不出相對路徑，
+    所以傳絕對路徑；5.0.0 在 Windows 上實測絕對路徑可用。
+    """
+    args = ["--project", project_file, "--reporter", "json", "--output", output_dir, "--skip-version-check"]
+    if config_file:
+        args += ["--config-file", config_file]
+    if settings["workers"] is not None:
+        args += ["--concurrency", str(settings["workers"])]
+    return args
 
 
 def _target(cfg):

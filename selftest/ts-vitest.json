@@ -19,7 +19,7 @@
       ]
     },
     {
-      "name": "沒改東西：變異測試通過",
+      "name": "沒改東西：抓錯檢查通過",
       "run": [
         "mutation",
         "--base",
@@ -91,6 +91,7 @@
       "exit": 1,
       "contains": [
         "沒抓到",
+        "改成",
         "FAIL："
       ]
     },
@@ -198,6 +199,34 @@
           "exit": 0,
           "json": "out-mut.json"
         }
+      ]
+    },
+    {
+      "name": "exclude_mutators 設成沒抓到的改法：StrykerJS 在工具端排除，結果由沒過變成通過",
+      "edits": [
+        {
+          "file": "src/shipping/fee.ts",
+          "old": "if (total >= 1000) {",
+          "new": "if (total >= 999) {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100,\n    \"exclude_mutators\": [\"ConditionalExpression\", \"EqualityOperator\"]"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main"
+      ],
+      "exit": 0,
+      "contains": [
+        "已排除：設定排除的改法",
+        "PASS"
+      ],
+      "not_contains": [
+        "改成"
       ]
     }
   ]
