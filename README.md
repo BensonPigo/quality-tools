@@ -193,7 +193,7 @@ quality-tools/
 | JS / TS（StrykerJS） | 秒數 × 1000 傳給 `timeoutMS`，意義同上 | 傳給 `concurrency` | 預設不排除；傳給 `mutator.excludedMutations`，StrykerJS 就不會產生這些改壞版本，省時間；核心也會標記 |
 | Python（cosmic-ray） | 預設 30 秒，每個改壞版本的總時限（同 v1） | 不支援，設了會在 stderr 印警告 | 預設不排除；只在核心過濾 |
 
-`timeout_seconds` 為 `null` 時，一律不傳參數給工具。
+C#、JS / TS 的 `timeout_seconds` 為 `null` 時，不傳參數給工具，用工具自己的預設。Python 的預設值是 30，一律寫進 cosmic-ray 的設定。
 
 ## 狀態與兩個比例
 

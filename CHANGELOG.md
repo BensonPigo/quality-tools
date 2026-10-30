@@ -55,7 +55,7 @@ git add tools/quality .quality.json
 - **預設值和覆蓋**：`mutation.timeout_seconds`、`mutation.workers`、`mutation.exclude_mutators`，寫 `null` 用語言預設值，repo 可以覆蓋。v2.0.0 的預設值不排除任何改法，也不改逾時和並行。Go 設 `timeout_seconds`、Python 設 `workers` 會印警告，設定沒有作用。
 - **一次只開一關**：`gates` 設定哪幾關啟用，沒啟用的關單獨執行時印「還沒啟用」並以 0 結束。新增 `check` 指令，依序跑已啟用的關，第一個沒過就停；`--skip` 略過指定的關，`--json 目錄` 寫出各關的 JSON 報告。
 - **現況報告**：CRAP 表加「修改次數」（超標的函式，統計 `baseline.churn_since` 以來改到它的 commit 數，建立的那一次不算），修改次數達到 `baseline.hot_churn` 的標「優先處理」並排在最前面。新增 `baseline --compare 舊.json` 和 `compare 舊.json 新.json`，印出超標函式數、要拆函式數、優先處理數、各套件抓錯率和測到率的前後差。
-- **JSON 報告**：`crap`、`mutation`、`check`、`baseline` 加 `--json`（`check` 是目錄）寫出同一份格式，含實際使用的量測工具版本。
+- **JSON 報告**：`crap`、`mutation`、`check` 加 `--json`（`check` 是目錄）寫出同一份格式，含實際使用的量測工具版本；`baseline` 不用加參數，一律在報告旁邊寫出同名的 `.json`。
 - **`migrate`**：把 v1 的 `.quality.json` 轉成 v2。
 - **發布方式**：除了 git submodule，新增 pip 安裝（`pip install "quality-tools @ git+https://...@v2.0.0"`，指令 `quality`）和 reusable workflow（`.github/workflows/quality.yml`）。
 - **`gate.sh` 範本**改成呼叫 `check --skip mutation`。
