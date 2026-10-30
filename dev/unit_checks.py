@@ -11,6 +11,7 @@ import copy
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,7 +19,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from qtools import cli, config, crap, equivalents, mutation, report, report_schema  # noqa: E402
+from qtools import baseline, cli, config, crap, equivalents, mutation, report, report_schema  # noqa: E402
 from qtools.langs import base, csharp, go, js, python  # noqa: E402
 from qtools.model import Function, Mutant  # noqa: E402
 from qtools.proc import QualityError  # noqa: E402
@@ -695,6 +696,223 @@ class DescribeChecks(unittest.TestCase):
             self.assertIsNone(mutation.location_text(path, {}))
             self.assertIsNone(mutation.location_text(os.path.join(tmp, "missing.cs"), loc(1, 1, 1, 2)))
             mutation._source_cache.clear()
+
+
+def _log(*commits):
+    """組出 git log -L 的輸出（--format=commit:<hash>）。每個 commit 是 (刪除行, 新增行) 或 (刪除行, 新增行, hunk 標頭)，
+    由新到舊排列。沒給標頭時：沒有刪除行的當成建立（--- /dev/null、-0,0），其餘是 -3,3。"""
+    out = []
+    for i, (deleted, added, *header) in enumerate(commits):
+        hunk = header[0] if header else ("@@ -3,3 +3,3 @@" if deleted else "@@ -0,0 +3,3 @@")
+        out += ["commit:{:040d}".format(i), "", "diff --git a/f.go b/f.go",
+                "--- a/f.go" if deleted or header else "--- /dev/null", "+++ b/f.go", hunk, " func W() int {"]
+        out += ["-" + x for x in deleted] + ["+" + x for x in added] + [" }"]
+    return "\n".join(out) + "\n"
+
+
+class ChurnChecks(unittest.TestCase):
+    def test_created_then_modified_twice_is_2(self):
+        log = _log((["return 2"], ["return 3"]), (["return 1"], ["return 2"]), ([], ["func W() int {", "return 1", "}"]))
+        self.assertEqual(baseline.parse_churn(log), 2)
+
+    def test_only_creation_commit_is_0(self):
+        self.assertEqual(baseline.parse_churn(_log(([], ["func W() int {", "return 1", "}"]))), 0)
+
+    def test_creation_commit_outside_time_range_counts_the_modifications(self):
+        # --since 把建立的 commit 排除在外，最舊的是有刪除行的修改
+        self.assertEqual(baseline.parse_churn(_log((["return 2"], ["return 3"]), (["return 1"], ["return 2"]))), 2)
+
+    def test_added_lines_only_with_nonzero_old_range_is_a_modification(self):
+        # 建立的 commit 在 --since 之外；最舊的是在既有函式裡加一行註解（只有 + 行，但舊側長度是 4）
+        log = _log(([], ["return 3", "// x"], "@@ -3,4 +3,5 @@"), (["return 1"], ["return 2"]))
+        self.assertEqual(baseline.parse_churn(log), 2)
+        self.assertEqual(baseline.parse_churn(_log(([], ["// x"], "@@ -3,4 +3,5 @@"))), 1)
+
+    def test_creation_hunk_in_existing_file_is_not_counted(self):
+        # 函式加在既有檔案的中間：舊側是 -8,0，一樣是建立
+        self.assertEqual(baseline.parse_churn(_log(([], ["func N() {", "}"], "@@ -8,0 +8,2 @@"))), 0)
+
+    def test_header_lines_are_not_counted_as_deleted_lines(self):
+        # 建立的 commit 檔頭是 --- /dev/null，不能當成刪除行
+        log = _log(([], ["a"]))
+        self.assertIn("--- /dev/null", log)
+        self.assertEqual(baseline.parse_churn(log), 0)
+
+    def test_empty_output_is_0(self):
+        self.assertEqual(baseline.parse_churn(""), 0)
+
+    def test_git_error_is_0(self):
+        failed = mock.Mock(returncode=128, stdout="", stderr="fatal: There is no path f.go in the commit")
+        with mock.patch.object(baseline, "run", return_value=failed):
+            self.assertEqual(baseline.count_churn("f.go", 3, 5, "6 months ago"), 0)
+
+    def test_real_git_history(self):
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e")
+
+        def git_in(tmp, *args):
+            subprocess.run(["git"] + list(args), cwd=tmp, env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def write(tmp, text):
+            with open(os.path.join(tmp, "f.go"), "w", encoding="utf-8", newline="\n") as f:
+                f.write(text)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            git_in(tmp, "init", "-q", "-b", "main")
+            write(tmp, "a\nfunc W() int {\n\treturn 1\n}\nb\n")
+            git_in(tmp, "add", "-A")
+            git_in(tmp, "commit", "-qm", "init")
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                self.assertEqual(baseline.count_churn("f.go", 2, 4, "6 months ago"), 0)
+                write(tmp, "a\nfunc W() int {\n\treturn 2\n}\nb\n")
+                git_in(tmp, "commit", "-qam", "c1")
+                write(tmp, "a\nfunc W() int {\n\treturn 3\n\t// x\n}\nb\n")
+                git_in(tmp, "commit", "-qam", "c2")
+                self.assertEqual(baseline.count_churn("f.go", 2, 5, "6 months ago"), 2)
+                self.assertEqual(baseline.count_churn("nofile.go", 2, 5, "6 months ago"), 0)
+                self.assertEqual(baseline.count_churn("f.go", 30, 40, "6 months ago"), 0)
+            finally:
+                os.chdir(cwd)
+
+
+def _func(name, c, cov, start=1):
+    f = Function("a.go", name, start, start + 5, c, cov)
+    f.crap = crap.crap_score(c, cov)
+    return f
+
+
+class HotChecks(unittest.TestCase):
+    cfg = config.validate({"version": 2, "language": "go", "baseline": {"hot_churn": 3}})
+
+    def test_hot_rule(self):
+        self.assertTrue(report.hot(True, 3, 3))
+        self.assertFalse(report.hot(True, 2, 3))
+        self.assertFalse(report.hot(False, 9, 3))  # 沒超標不算
+        self.assertFalse(report.hot(True, None, 3))
+
+    def test_hot_functions_sort_first_then_by_crap(self):
+        high = _func("High", 14, 0.5, 10)  # CRAP 38.5，超標
+        low = _func("Low", 5, 0.0, 1)  # CRAP 30，超標
+        ok = _func("Ok", 1, 1.0, 20)
+        funcs = crap.score_functions([ok, low, high])
+        self.assertEqual([f.name for f in funcs], ["High", "Low", "Ok"])
+
+        def names(churn):
+            return [f.name for f in baseline.order_functions(funcs, churn, self.cfg)]
+
+        self.assertEqual(names({}), ["High", "Low", "Ok"])  # 沒有優先處理的，照 CRAP 由高到低
+        self.assertEqual(names({("a.go", "Low", 1): 3}), ["Low", "High", "Ok"])  # CRAP 較低但優先處理，排最前面
+        self.assertEqual(names({("a.go", "Low", 1): 2}), ["High", "Low", "Ok"])  # 修改次數沒到 hot_churn
+        self.assertEqual(names({("a.go", "Low", 1): 3, ("a.go", "High", 10): 9}), ["High", "Low", "Ok"])  # 都優先處理，照 CRAP
+
+    def test_crap_json_marks_churn_and_hot_only_for_over_functions(self):
+        funcs = [_func("Hot", 5, 0.0, 1), _func("Cold", 14, 0.5, 10), _func("Ok", 1, 1.0, 20)]
+        items = report.crap_json(funcs, 12, 0, {("a.go", "Hot", 1): 3, ("a.go", "Cold", 10): 0}, 3)["functions"]
+        self.assertEqual([(i["name"], i["churn"], i["hot"]) for i in items],
+                         [("Hot", 3, True), ("Cold", 0, False), ("Ok", None, False)])
+
+    def test_crap_json_without_churn_is_null_and_not_hot(self):
+        items = report.crap_json([_func("Hot", 5, 0.0)], 12, 0)["functions"]
+        self.assertEqual((items[0]["churn"], items[0]["hot"]), (None, False))
+
+
+def _baseline_report(over=2, split=1, hot_count=1, pkgs=()):
+    funcs = []
+    for i in range(over):
+        funcs.append({"file": "a.go", "name": "F{}".format(i), "start": 1, "end": 5, "complexity": 14 if i < split else 5,
+                      "coverage": 0.0, "crap": 30.0, "over": True, "advice": "split" if i < split else "cover",
+                      "need_coverage": None if i < split else 35, "churn": 1, "hot": i < hot_count})
+    funcs.append({"file": "a.go", "name": "Ok", "start": 9, "end": 12, "complexity": 1, "coverage": 1.0, "crap": 1.0,
+                  "over": False, "advice": None, "need_coverage": None, "churn": None, "hot": False})
+    zero = {s: 0 for s in ("KILLED", "TIMED_OUT", "LIVED", "NOT_COVERED", "EQUIVALENT", "EXCLUDED_MUTATOR", "NOT_VIABLE", "SKIPPED")}
+    packages = [{"package": p, "counts": dict(zero), "kill_rate": k, "reach_rate": r} for p, k, r in pkgs]
+    return {
+        "schema": 1, "command": "baseline", "tool_version": "2.0.0", "language": "go", "base": None,
+        "commit": "a" * 40, "result": "pass", "tools": {},
+        "crap": {"threshold": 12, "functions": funcs, "untouched_over": 0},
+        "mutation": {"kill_rate_threshold": 80, "reach_rate_threshold": 0, "counts": dict(zero), "kill_rate": 50.0,
+                     "reach_rate": 100.0, "mutants": [], "packages": packages,
+                     "settings": {"timeout_seconds": None, "workers": None, "exclude_mutators": []},
+                     "unused_equivalents": []},
+    }
+
+
+class CompareChecks(unittest.TestCase):
+    def test_deltas(self):
+        old = _baseline_report(over=3, split=1, hot_count=0, pkgs=[("p", 50.0, 80.0)])
+        new = _baseline_report(over=2, split=1, hot_count=1, pkgs=[("p", 62.5, 80.0)])
+        new["mutation"]["kill_rate"] = 60.0
+        text = "\n".join(baseline.compare_lines(old, new))
+        self.assertIn("函式總數：4 → 3（-1）", text)
+        self.assertIn("超標函式數：3 → 2（-1）", text)
+        self.assertIn("要拆函式數：1 → 1（±0）", text)
+        self.assertIn("優先處理數：0 → 1（+1）", text)
+        self.assertIn("整體抓錯率：50.00% → 60.00%（+10.00 百分點）", text)
+        self.assertIn("整體測到率：100.00% → 100.00%（±0 百分點）", text)
+        self.assertIn("套件 p：抓錯率 50.00% → 62.50%（+12.50 百分點）；測到率 80.00% → 80.00%（±0 百分點）", text)
+
+    def test_added_and_removed_packages(self):
+        old = _baseline_report(pkgs=[("gone", 50.0, 80.0), ("same", 70.0, 70.0)])
+        new = _baseline_report(pkgs=[("same", 70.0, 70.0), ("fresh", 90.0, 100.0)])
+        text = "\n".join(baseline.compare_lines(old, new))
+        self.assertIn("套件 fresh：新增", text)
+        self.assertIn("套件 gone：已移除", text)
+        self.assertIn("套件 same：抓錯率 70.00% → 70.00%（±0 百分點）", text)
+
+    def test_rate_missing_on_one_side_has_no_delta(self):
+        old = _baseline_report(pkgs=[("p", None, None)])
+        new = _baseline_report(pkgs=[("p", 70.0, 70.0)])
+        self.assertIn("套件 p：抓錯率 — → 70.00%；", "\n".join(baseline.compare_lines(old, new)))
+
+    def test_helper_reports_pass_schema(self):
+        self.assertEqual(report_schema.validate(_baseline_report(pkgs=[("p", 50.0, 80.0)])), [])
+
+    def _load(self, data, raw=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "r.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(raw if raw is not None else json.dumps(data))
+            return baseline.load_report(path)
+
+    def test_load_accepts_baseline(self):
+        self.assertEqual(self._load(_baseline_report())["command"], "baseline")
+
+    def test_load_rejects_non_baseline(self):
+        data = _baseline_report()
+        data["command"], data["mutation"] = "crap", None
+        with self.assertRaises(QualityError) as cm:
+            self._load(data)
+        self.assertEqual(cm.exception.exit_code, 2)
+        self.assertIn("不是現況報告", str(cm.exception))
+
+    def test_load_rejects_other_schema_version(self):
+        data = _baseline_report()
+        data["schema"] = 2
+        with self.assertRaises(QualityError) as cm:
+            self._load(data)
+        self.assertIn("schema 版本", str(cm.exception))
+
+    def test_load_rejects_bad_format_and_bad_json(self):
+        data = _baseline_report()
+        del data["tools"]
+        for args in ((data, None), (None, "{not json"), (None, "[]")):
+            with self.assertRaises(QualityError) as cm:
+                self._load(*args)
+            self.assertEqual(cm.exception.exit_code, 2)
+
+    def test_compare_command_exits_0_and_prints(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for name, over in (("old.json", 3), ("new.json", 2)):
+                paths.append(os.path.join(tmp, name))
+                with open(paths[-1], "w", encoding="utf-8") as f:
+                    json.dump(_baseline_report(over=over), f)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = cli.cmd_compare(mock.Mock(old=paths[0], new=paths[1]))
+        self.assertEqual(code, 0)
+        self.assertIn("超標函式數：3 → 2（-1）", out.getvalue())
 
 
 if __name__ == "__main__":

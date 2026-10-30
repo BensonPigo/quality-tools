@@ -29,7 +29,14 @@ def print_crap_table(funcs, threshold, with_advice):
     return failed
 
 
-def crap_json(funcs, threshold, untouched_over):
+def hot(over, churn, hot_churn):
+    """優先處理：超標，而且修改次數（超標的才有）達到 hot_churn。"""
+    return bool(over and churn is not None and churn >= hot_churn)
+
+
+def crap_json(funcs, threshold, untouched_over, churn=None, hot_churn=None):
+    """churn 是 {(file, name, start): 修改次數}，只有 baseline 會給；crap、mutation 指令不算，churn 為 null、hot 為 false。"""
+    churn = churn or {}
     items = []
     for f in funcs:
         over = f.crap > threshold
@@ -38,7 +45,8 @@ def crap_json(funcs, threshold, untouched_over):
             "file": f.file, "name": f.name, "start": f.start, "end": f.end,
             "complexity": f.complexity, "coverage": f.coverage, "crap": f.crap, "over": over,
             "advice": kind, "need_coverage": need,
-            "churn": None, "hot": False,  # 修改次數和優先處理由 baseline 填入（S4）
+            "churn": churn.get((f.file, f.name, f.start)) if over else None,
+            "hot": hot(over, churn.get((f.file, f.name, f.start)), hot_churn),
         })
     return {"threshold": threshold, "functions": items, "untouched_over": untouched_over}
 

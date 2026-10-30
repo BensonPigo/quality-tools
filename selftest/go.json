@@ -633,8 +633,43 @@
       ]
     },
     {
-      "name": "gate.sh：沒改東西，放行（結束碼 0）",
+      "name": "gate.sh：沒改東西（base 的改動已 commit），放行（結束碼 0）",
       "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "git commit -qam base-main"
+          ],
+          "exit": 0
+        },
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 0
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"main\""
+        }
+      ]
+    },
+    {
+      "name": "gate.sh：沒改東西時不檢查工具在不在（刪掉 tools/quality/quality.py 並 commit，仍放行）",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "rm -f tools/quality/quality.py && git add -A && git commit -qm drop-tool"
+          ],
+          "exit": 0
+        },
         {
           "shell": [
             "{bash}",
@@ -792,6 +827,157 @@
           "file": "shipping/fee.go",
           "old": "return 50",
           "new": "return 55"
+        }
+      ]
+    },
+    {
+      "name": "baseline：Weight 建立後改過兩次，修改次數 2，達到 hot_churn 標優先處理；Checkout 超標但沒改過，修改次數 0",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"language\": \"go\",",
+          "new": "\"language\": \"go\",\n  \"baseline\": {\"hot_churn\": 2},"
+        },
+        {
+          "file": "shipping/fee.go",
+          "old": "\tif kg > 20 {",
+          "new": "\t// v1\n\tif kg > 20 {"
+        }
+      ],
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "git add -A && git commit -qm weight-v1"
+          ],
+          "exit": 0
+        },
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "sed -i 's|// v1|// v2|' shipping/fee.go && git commit -qam weight-v2"
+          ],
+          "exit": 0
+        },
+        {
+          "run": [
+            "baseline",
+            "--out",
+            "docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "docs/q.json"
+          ],
+          "json": "docs/q.json",
+          "json_values": {
+            "command": "baseline",
+            "result": "pass",
+            "crap.functions.0.name": "Weight",
+            "crap.functions.0.churn": 2,
+            "crap.functions.0.hot": true,
+            "crap.functions.name=Checkout.churn": 0,
+            "crap.functions.name=Checkout.hot": false,
+            "crap.functions.name=Fee.churn": null,
+            "crap.functions.name=Fee.hot": false
+          }
+        },
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "cat docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "優先處理 1",
+            "| 修改次數 |"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "情境隔離：前一個情境做的 commit 不會留下來，repo 只有初始 commit",
+      "steps": [
+        {
+          "shell": [
+            "git",
+            "rev-list",
+            "--count",
+            "HEAD"
+          ],
+          "exit": 0,
+          "equals": "1"
+        }
+      ]
+    },
+    {
+      "name": "baseline --compare 舊報告：markdown 多一節「跟上一次比較」；compare 印出前後差；compare 讀到不是現況報告的 JSON 結束碼 2",
+      "edits": [
+        {
+          "file": "old.json",
+          "content": "{\n  \"schema\": 1,\n  \"command\": \"baseline\",\n  \"tool_version\": \"2.0.0\",\n  \"language\": \"go\",\n  \"base\": null,\n  \"commit\": \"0000000000000000000000000000000000000000\",\n  \"result\": \"pass\",\n  \"tools\": {\n    \"go\": \"1.27\"\n  },\n  \"crap\": {\n    \"threshold\": 12,\n    \"untouched_over\": 0,\n    \"functions\": [\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Weight\",\n        \"start\": 15,\n        \"end\": 28,\n        \"complexity\": 5,\n        \"coverage\": 0.0,\n        \"crap\": 30.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 35,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"checkout.go\",\n        \"name\": \"Checkout\",\n        \"start\": 31,\n        \"end\": 70,\n        \"complexity\": 14,\n        \"coverage\": 0.739,\n        \"crap\": 17.5,\n        \"over\": true,\n        \"advice\": \"split\",\n        \"need_coverage\": null,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Fee\",\n        \"start\": 4,\n        \"end\": 13,\n        \"complexity\": 3,\n        \"coverage\": 0.4,\n        \"crap\": 13.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 60,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"notest/add.go\",\n        \"name\": \"Add\",\n        \"start\": 3,\n        \"end\": 5,\n        \"complexity\": 1,\n        \"coverage\": 0.0,\n        \"crap\": 2.0,\n        \"over\": false,\n        \"advice\": null,\n        \"need_coverage\": null,\n        \"churn\": null,\n        \"hot\": false\n      }\n    ]\n  },\n  \"mutation\": {\n    \"kill_rate_threshold\": 80,\n    \"reach_rate_threshold\": 0,\n    \"counts\": {\n      \"KILLED\": 8,\n      \"TIMED_OUT\": 0,\n      \"LIVED\": 6,\n      \"NOT_COVERED\": 0,\n      \"EQUIVALENT\": 0,\n      \"EXCLUDED_MUTATOR\": 0,\n      \"NOT_VIABLE\": 0,\n      \"SKIPPED\": 0\n    },\n    \"kill_rate\": 57.142857142857146,\n    \"reach_rate\": 100.0,\n    \"mutants\": [],\n    \"packages\": [\n      {\n        \"package\": \"shipping\",\n        \"counts\": {\n          \"KILLED\": 5,\n          \"TIMED_OUT\": 0,\n          \"LIVED\": 5,\n          \"NOT_COVERED\": 0,\n          \"EQUIVALENT\": 0,\n          \"EXCLUDED_MUTATOR\": 0,\n          \"NOT_VIABLE\": 0,\n          \"SKIPPED\": 0\n        },\n        \"kill_rate\": 50.0,\n        \"reach_rate\": 100.0\n      },\n      {\n        \"package\": \"legacy\",\n        \"counts\": {\n          \"KILLED\": 3,\n          \"TIMED_OUT\": 0,\n          \"LIVED\": 1,\n          \"NOT_COVERED\": 0,\n          \"EQUIVALENT\": 0,\n          \"EXCLUDED_MUTATOR\": 0,\n          \"NOT_VIABLE\": 0,\n          \"SKIPPED\": 0\n        },\n        \"kill_rate\": 75.0,\n        \"reach_rate\": 100.0\n      }\n    ],\n    \"settings\": {\n      \"timeout_seconds\": null,\n      \"workers\": null,\n      \"exclude_mutators\": []\n    },\n    \"unused_equivalents\": []\n  }\n}\n"
+        },
+        {
+          "file": "bad.json",
+          "content": "{\n  \"schema\": 1,\n  \"command\": \"crap\",\n  \"tool_version\": \"2.0.0\",\n  \"language\": \"go\",\n  \"base\": null,\n  \"commit\": \"0000000000000000000000000000000000000000\",\n  \"result\": \"pass\",\n  \"tools\": {\n    \"go\": \"1.27\"\n  },\n  \"crap\": {\n    \"threshold\": 12,\n    \"untouched_over\": 0,\n    \"functions\": [\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Weight\",\n        \"start\": 15,\n        \"end\": 28,\n        \"complexity\": 5,\n        \"coverage\": 0.0,\n        \"crap\": 30.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 35,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"checkout.go\",\n        \"name\": \"Checkout\",\n        \"start\": 31,\n        \"end\": 70,\n        \"complexity\": 14,\n        \"coverage\": 0.739,\n        \"crap\": 17.5,\n        \"over\": true,\n        \"advice\": \"split\",\n        \"need_coverage\": null,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Fee\",\n        \"start\": 4,\n        \"end\": 13,\n        \"complexity\": 3,\n        \"coverage\": 0.4,\n        \"crap\": 13.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 60,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"notest/add.go\",\n        \"name\": \"Add\",\n        \"start\": 3,\n        \"end\": 5,\n        \"complexity\": 1,\n        \"coverage\": 0.0,\n        \"crap\": 2.0,\n        \"over\": false,\n        \"advice\": null,\n        \"need_coverage\": null,\n        \"churn\": null,\n        \"hot\": false\n      }\n    ]\n  },\n  \"mutation\": null\n}\n"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "baseline",
+            "--out",
+            "docs/q.md",
+            "--compare",
+            "old.json"
+          ],
+          "exit": 0,
+          "contains": [
+            "跟上一次比較",
+            "超標函式數：3 → 2（-1）",
+            "套件 legacy：已移除"
+          ],
+          "json": "docs/q.json"
+        },
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "cat docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "## 跟上一次比較",
+            "超標函式數：3 → 2"
+          ]
+        },
+        {
+          "run": [
+            "compare",
+            "old.json",
+            "docs/q.json"
+          ],
+          "exit": 0,
+          "contains": [
+            "→",
+            "超標函式數：3 → 2（-1）",
+            "整體抓錯率：",
+            "套件 shipping：抓錯率"
+          ]
+        },
+        {
+          "run": [
+            "compare",
+            "bad.json",
+            "docs/q.json"
+          ],
+          "exit": 2,
+          "contains": [
+            "不是現況報告"
+          ]
         }
       ]
     }

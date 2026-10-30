@@ -6,7 +6,9 @@
     python tools/quality/quality.py crap --base origin/main       # 第二關：只檢查改到的函式
     python tools/quality/quality.py mutation --base origin/main   # 第三關：抓錯檢查，只計算改到的行
     python tools/quality/quality.py check --base origin/main      # 依 gates 依序跑，第一個沒過就停
-    python tools/quality/quality.py baseline                      # 量現況，寫成 docs/品質現況.md
+    python tools/quality/quality.py baseline                      # 量現況，寫成 docs/品質現況.md 和 .json
+    python tools/quality/quality.py baseline --compare 舊.json    # 量完跟上一次的現況報告比較
+    python tools/quality/quality.py compare 舊.json 新.json       # 只比較兩份現況報告，不量測
     python tools/quality/quality.py migrate                       # v1 的 .quality.json 轉成 v2
 
 crap 和 mutation 不加 --base 時，檢查整個專案；加 --json 檔名，另外寫一份 JSON 報告。
@@ -45,7 +47,11 @@ def main(argv=None):
     p.add_argument("--skip", nargs="+", default=[], metavar="名稱", help="這次不跑的關：{}".format("、".join(config.GATES)))
     p.add_argument("--json", metavar="目錄", help="crap 和 mutation 兩關各寫一份 JSON 報告到這個目錄")
     p = sub.add_parser("baseline", help="量現況")
-    p.add_argument("--out", help="報告檔名，預設用設定檔的 baseline.out")
+    p.add_argument("--out", help="報告檔名，預設用設定檔的 baseline.out；JSON 寫到同名的 .json")
+    p.add_argument("--compare", metavar="舊.json", help="跟上一次的現況報告（JSON）比較，印出前後差")
+    p = sub.add_parser("compare", help="比較兩份現況報告（JSON），不量測")
+    p.add_argument("old", metavar="舊.json")
+    p.add_argument("new", metavar="新.json")
     sub.add_parser("migrate", help="把 v1 的 .quality.json 轉成 v2")
     args = parser.parse_args(argv)
 
@@ -55,6 +61,8 @@ def main(argv=None):
     try:
         if args.command == "migrate":
             sys.exit(cmd_migrate())
+        if args.command == "compare":
+            sys.exit(cmd_compare(args))
         cfg = config.load_config()
         lang = load_language(cfg["language"])
         command = {"test": cmd_test, "crap": cmd_crap, "mutation": cmd_mutation, "check": cmd_check,
@@ -226,13 +234,28 @@ def cmd_check(args, cfg, lang):
 # ---------- 量現況 ----------
 
 def cmd_baseline(args, cfg, lang):
+    old = baseline.load_report(args.compare) if args.compare else None  # 舊報告讀不了就先停，不浪費量測時間
     entries = equivalents.load(cfg["mutation"]["equivalents_file"])
     funcs = crap.score_functions(lang.measure_functions(cfg))
     mutants = lang.measure_mutants(cfg)
-    unused = classify(mutants, mutants, lang.settings(cfg), entries, None)
+    settings = lang.settings(cfg)
+    unused = classify(mutants, mutants, settings, entries, None)
+    churn = baseline.compute_churn(funcs, cfg)
+    data = baseline.build_json(funcs, mutants, cfg, lang, churn, settings, unused)
+    diff = baseline.compare_lines(old, data) if old else None
     out = args.out or cfg["baseline"]["out"]
-    baseline.write_baseline(funcs, mutants, cfg, lang, out, unused)
-    print("已寫入 " + out)
+    baseline.write_baseline(funcs, mutants, cfg, lang, out, unused, churn, diff)
+    report.write_json(baseline.json_path(out), data)
+    print("已寫入 {} 和 {}".format(out, baseline.json_path(out)))
+    if diff:
+        print("\n跟上一次比較（{}）".format(args.compare))
+        print("\n".join(diff))
+    return 0
+
+
+def cmd_compare(args):
+    """不量測，只讀兩份 baseline JSON 印出前後差。只呈現，不判定，結束碼一律 0（讀不了或格式不對是 2）。"""
+    print("\n".join(baseline.compare_lines(baseline.load_report(args.old), baseline.load_report(args.new))))
     return 0
 
 
