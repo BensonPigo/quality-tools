@@ -125,7 +125,7 @@
       "exit": 2
     },
     {
-      "name": "v1 格式的設定檔：結束碼 2，提示執行 migrate",
+      "name": "沒有 version 的設定檔：結束碼 2",
       "edits": [
         {
           "file": ".quality.json",
@@ -139,7 +139,7 @@
       ],
       "exit": 2,
       "contains": [
-        "migrate"
+        "version"
       ]
     },
     {

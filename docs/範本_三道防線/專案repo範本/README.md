@@ -326,40 +326,6 @@ git commit -m "品質工具升級到 v2.1.0"
 
 **退回舊版**也是同樣的步驟，把 `v2.1.0` 換成舊的版本號。
 
-## 從 v1 升級
-
-v2.0.0 的 `.quality.json` 格式不相容：v2 的工具讀到 v1 的設定檔，所有指令都以結束碼 2 結束；v1 的工具讀 v2 的設定檔時，會忽略不認得的鍵，`crap.threshold` 等門檻悄悄退回 v1 的預設值。所以工具版本和設定檔要在同一個 PR 裡改。
-
-1. **升級 submodule**，在新分支上：
-
-   ```bash
-   git checkout -b 升級品質工具v2
-   git -C tools/quality fetch --tags
-   git -C tools/quality checkout v2.0.0
-   git add tools/quality
-   ```
-
-2. **轉換設定檔**：
-
-   ```bash
-   python tools/quality/quality.py migrate
-   ```
-
-   把 `.quality.json` 改寫成 v2，並印出前後差異。轉換後的判定結果跟 v1 相同：`gates` 寫成三關全開；v1 沒寫過測到率門檻的，`mutation.reach_rate_threshold` 寫成 0；`python_mutant_timeout` 只在 Python 專案轉成 `mutation.timeout_seconds`。步驟 4 說明為什麼要把 `reach_rate_threshold` 調成大於 0，跑過現況報告之後再決定要不要調。
-
-3. **檢查差異**：用 `git diff .quality.json` 確認門檻和 v1 的值一致；在專案根目錄執行 `python tools/quality/quality.py check --base origin/main`，確認結果跟升級前一樣。
-4. **同步更新範本的其他檔案**（跟這個資料夾的版本對照）：
-   - `.claude/hooks/gate.sh`：新版呼叫 `check --skip mutation`。
-   - `.claude/settings.json`：`permissions.deny` 加 `Edit(/.quality-equivalents.json)`、`Edit(/CODEOWNERS)`。
-   - 新增 `.quality-equivalents.json`（內容 `[]`）和 `CODEOWNERS`。
-   - workflow：步驟名稱改成「第一關／第二關／第三關」，快取 key 的路徑改成 `tools/quality/qtools/langs/<語言>.py` 和 `tools/quality/qtools/helpers/**`（舊路徑，也就是 `tools/quality/` 根目錄的語言模組檔和 `tools/quality/dotnet/**`、`tools/quality/js/**`，已經不存在）。
-   - `CLAUDE.md`：用新的 `CLAUDE片段.md` 取代舊的品質規則。
-   - 分支保護的受保護檔案模式加 `.quality-equivalents.json`、`CODEOWNERS`。
-   - JS 專案確認 StrykerJS 是 10.0.0 或 10.1.1；Python 專案確認 cosmic-ray 是 8.7.0，其他版本會以結束碼 2 結束。
-5. **送 PR**，CI 用新版工具跑一遍，確認結果跟升級前一樣再合併。
-
-v1 的 `.quality.json` 鍵名對照見 quality-tools 的 `CHANGELOG.md`。
-
 ## 試點期間不想用 submodule
 
 工具還在常常調整時，每改一次就要打標籤、更新 submodule，比較麻煩。試點的那一個 repo 可以先把 `quality-tools` 直接複製進去：
@@ -398,4 +364,3 @@ find 目標repo/tools/quality -name __pycache__ -prune -exec rm -rf {} +
 | reusable workflow | 還沒有在真的 runner 上跑過：`tools-ref` 與 `uses:` 版本相同、`tools-token` 讀私有 repo、submodule 版本比對，都沒有實測。Gitea 要什麼版本才能引用另一個 repo 的 reusable workflow，也沒有確認 |
 | submodule 接法 | v1.0.0 時在本機用 git 模擬過完整流程（遠端用本機的 bare repo 代替 Gitea）：發布版本 → `git submodule add` 相對網址 → `clone --recurse-submodules` → 三個指令結果正確 → 改舊函式時 `gate.sh` 擋下 → 升級、退回 → 設定 `submodule.recurse` 時切換分支工具跟著切。v2.0.0 沒有重做這個流程 |
 | CODEOWNERS、分支保護 | 還沒在 Gitea 上跑過：CODEOWNERS 語法、受保護的檔案模式擋不擋得住 submodule 版本的變更，步驟 6、8 會測到 |
-| 從 v1 升級 | `migrate` 在 `selftest.py` 的情境測過；在真的 v1 專案 repo 上走完整個「從 v1 升級」流程還沒做過 |

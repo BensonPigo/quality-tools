@@ -139,7 +139,7 @@
       ]
     },
     {
-      "name": "v1 格式的設定檔：結束碼 2，提示執行 migrate",
+      "name": "沒有 version 的設定檔：結束碼 2",
       "edits": [
         {
           "file": ".quality.json",
@@ -153,7 +153,7 @@
       ],
       "exit": 2,
       "contains": [
-        "migrate"
+        "version"
       ]
     },
     {
@@ -211,38 +211,6 @@
           ],
           "exit": 0,
           "json": "out-mut.json"
-        }
-      ]
-    },
-    {
-      "name": "v1 設定檔沒寫 mutant_coverage_threshold：migrate 寫成 0，沒測試的新程式照樣通過，跟 v1 一樣",
-      "edits": [
-        {
-          "file": ".quality.json",
-          "content": "{\n  \"language\": \"go\",\n  \"base\": \"origin/main\",\n  \"crap_threshold\": 12,\n  \"efficacy_threshold\": 80,\n  \"exclude\": [\"tools/\", \"vendor/\", \"node_modules/\"]\n}\n"
-        },
-        {
-          "file": "notest/sub.go",
-          "content": "package notest\n\nfunc Sub(a, b int) int {\n\treturn a - b\n}\n"
-        }
-      ],
-      "steps": [
-        {
-          "run": [
-            "migrate"
-          ],
-          "exit": 0,
-          "contains": [
-            "\"reach_rate_threshold\": 0"
-          ]
-        },
-        {
-          "run": [
-            "mutation",
-            "--base",
-            "main"
-          ],
-          "exit": 0
         }
       ]
     },

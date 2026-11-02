@@ -38,4 +38,3 @@ shop/order-service
 
 1. quality-tools 的版本用標籤發布，v2.0.0 由維護者驗證後打標籤。標籤打好之前，範本裡寫的 `v2.0.0` 還不存在。維護方式見這個 repo 根目錄的 `README.md`，每一版改了什麼見 `CHANGELOG.md`。
 2. 挑一個試點的專案 repo，照 `專案repo範本/README.md` 的步驟套用。範本的 `.quality.json` 只啟用第一關（單元測試），之後依導入步驟「一次上一關」，一兩週加一關。
-3. 已經在用 v1 的專案 repo，看 `專案repo範本/README.md` 的「從 v1 升級」。

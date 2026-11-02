@@ -62,7 +62,7 @@ quality-tools/
 ├── pyproject.toml             # pip 安裝設定，指令 quality
 ├── qtools/
 │   ├── cli.py                 # 指令解析、各指令流程、結束碼
-│   ├── config.py              # .quality.json v2：預設值、驗證、migrate
+│   ├── config.py              # .quality.json v2：預設值、驗證
 │   ├── model.py               # Function、Mutant、狀態和白話名稱
 │   ├── changes.py             # git diff → 改到的行
 │   ├── crap.py                # CRAP、拆函式或補測試的建議
@@ -114,7 +114,6 @@ quality-tools/
 | `check [--base B] [--skip 名稱 ...] [--json 目錄]` | 依 `gates` 的啟用狀態，照 test、crap、mutation 的順序跑，第一個沒過就停。`--base` 沒給就用 `.quality.json` 的 `base`。`--skip` 可以接多個關名，AI 結束前的自動檢查用 `--skip mutation`。`--json 目錄` 把 crap、mutation 兩關各寫成 `crap.json`、`mutation.json`，沒跑到的關不寫檔 |
 | `baseline [--out 檔名] [--compare 舊.json]` | 量整個專案的現況，寫成 `baseline.out`（預設 `docs/品質現況.md`）和同名的 `.json`。CRAP 表有「修改次數」和「優先處理」。加 `--compare` 時，量完跟舊的現況報告比較，印出前後差，並在 markdown 最後加「## 跟上一次比較」 |
 | `compare 舊.json 新.json` | 不量測，只比較兩份現況報告（JSON），印出前後差 |
-| `migrate` | 把專案根目錄的 v1 `.quality.json` 改寫成 v2，並印出前後差異 |
 
 結束碼：
 
@@ -132,7 +131,7 @@ quality-tools/
 
 ## 設定檔：`.quality.json`
 
-專案根目錄的 `.quality.json`，鍵名用白話名稱。未知的鍵、型別不對、缺 `version` 或用了 v1 的鍵名，都以結束碼 2 結束，不會默默變成預設值。v1 的檔案讀到時，訊息會叫人執行 `migrate`。
+專案根目錄的 `.quality.json`，鍵名用白話名稱。未知的鍵、型別不對、缺 `version` 或 `version` 不是 2，都以結束碼 2 結束，不會默默變成預設值。
 
 ```json
 {
@@ -362,7 +361,7 @@ python selftest.py --update go     # 確認新的 CRAP 表格是對的之後，�
 2. 跑 `test`，要通過；跑整個專案的 `crap`，表格要跟 `selftest/<範例>.crap.txt` 一模一樣。
 3. 依序跑 `selftest/<範例>.json` 的每個情境：先 `git reset --hard` 回初始 commit 並 `git clean`，照 `edits` 改檔案，執行指令，檢查結束碼、輸出文字，以及 `--json` 寫出的檔案是否符合格式。
 
-情境涵蓋：沒改東西、改到沒有測試的舊函式（CRAP 沒過）、只改函式外面的註解、把免運門檻從 1000 改成 999（改壞的版本沒被抓到）、測試失敗；排除清單、`exclude_mutators`、`timeout_seconds` 和 `workers`、`gates`、`check`、v1 設定與 `migrate`、現況報告的修改次數與 `compare`、範本 `gate.sh`。
+情境涵蓋：沒改東西、改到沒有測試的舊函式（CRAP 沒過）、只改函式外面的註解、把免運門檻從 1000 改成 999（改壞的版本沒被抓到）、測試失敗；排除清單、`exclude_mutators`、`timeout_seconds` 和 `workers`、`gates`、`check`、沒有 version 的設定檔、現況報告的修改次數與 `compare`、範本 `gate.sh`。
 
 selftest 的暫存目錄在系統暫存資料夾底下。Windows 的使用者名稱超過 8 個字元或含有 `.` 時，這個路徑通常會是 8.3 短檔名（例如 `C:/Users/ALEXAN~1.LIN`），剛好會測到工具在短檔名目錄下能不能正確對應路徑。
 
@@ -394,7 +393,7 @@ python dev/v1_parity.py record             # 重新用 v1.0.0 記錄（一般不
 |---|---|---|
 | 刪測試、把測試的正確答案改弱 | 工具擋不住 | 審 PR 時看測試檔的 diff |
 | 不同語言的圈複雜度和覆蓋率，算法不完全一樣 | 同一個門檻在不同語言的嚴格程度略有差異 | 各語言的算法見下一節。門檻只在同一種語言內比較 |
-| 新增一段完全沒有測試的簡單程式碼，CRAP 和抓錯率都擋不住 | 圈複雜度 1、沒有測試的函式，CRAP 只有 2；抓錯率只算有測試涵蓋的改壞版本 | 設 `mutation.reach_rate_threshold`（預設 50）。從 v1 `migrate` 來的設定保留 v1 的值，沒寫過就是 0，要手動調 |
+| 新增一段完全沒有測試的簡單程式碼，CRAP 和抓錯率都擋不住 | 圈複雜度 1、沒有測試的函式，CRAP 只有 2；抓錯率只算有測試涵蓋的改壞版本 | 設 `mutation.reach_rate_threshold`（預設 50）。從 v1 手動改過來的設定要自己明寫這個值，v1 沒寫過就是 0 |
 | gremlins 和 cosmic-ray 取得「改成什麼」靠對照表推算 | 對照表沒有的改法，輸出退回「改法 名稱」和該行原文，不影響分數 | 在 `qtools/langs/go.py`、`python.py` 補對照表 |
 | `mutation.mutants[].function` 一律是 `null` | 報告看不到改壞版本所在的函式名稱 | 看 `file` 和 `line` |
 | Go 不支援 `timeout_seconds`，Python 不支援 `workers` | 設了只印警告，不生效 | 見「工具預設值」 |

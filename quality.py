@@ -7,7 +7,6 @@
     python tools/quality/quality.py crap --base origin/main
     python tools/quality/quality.py mutation --base origin/main
     python tools/quality/quality.py baseline
-    python tools/quality/quality.py migrate
 
 指令、設定檔和結束碼的說明見 qtools/cli.py 與 qtools/config.py。
 """

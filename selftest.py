@@ -79,7 +79,7 @@ def main():
         pack(args.pack[0], args.pack[1])
         return
 
-    # 純函式的單元測試先跑，不需要語言工具，幾秒內就能知道版本檢查、migrate、schema 有沒有壞
+    # 純函式的單元測試先跑，不需要語言工具，幾秒內就能知道版本檢查、設定檔驗證、schema 有沒有壞
     print("=== dev/unit_checks.py", flush=True)
     if subprocess.call([sys.executable, UNIT_CHECKS], env=dict(os.environ, PYTHONUTF8="1")) != 0:
         print("\nFAIL：dev/unit_checks.py 沒過")

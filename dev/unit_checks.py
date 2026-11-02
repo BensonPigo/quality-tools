@@ -1,4 +1,4 @@
-"""不需要語言工具的純函式測試：版本檢查、設定檔 v2 與 migrate、JSON 報告格式、CRAP 建議、抓錯比例。
+"""不需要語言工具的純函式測試：版本檢查、設定檔 v2、JSON 報告格式、CRAP 建議、抓錯比例。
 
 selftest.py 一開始會先跑這支。檔名刻意不符合 test_*.py、*_test.py、*.test.*，專案的 pytest、Vitest、Jest
 預設不會把掛在 tools/quality 底下的這支收進去。用標準函式庫 unittest：
@@ -91,22 +91,24 @@ class ConfigChecks(unittest.TestCase):
         self.assertEqual(cfg["mutation"]["kill_rate_threshold"], 90)
         self.assertEqual(cfg["mutation"]["reach_rate_threshold"], 50)
 
-    def test_v1_keys_point_to_migrate(self):
-        for key, value in (("efficacy_threshold", 80), ("mutant_coverage_threshold", 0), ("crap_threshold", 12),
-                           ("dotnet_solution", "a.sln"), ("js_test_runner", "jest"), ("python_mutant_timeout", 30)):
-            with self.assertRaises(QualityError, msg=key) as cm:
-                config.validate(self.v2(**{key: value}))
-            self.assertIn("migrate", str(cm.exception))
-
-    def test_missing_version_points_to_migrate(self):
+    def test_v1_shaped_config_without_version_exits_2(self):
         with self.assertRaises(QualityError) as cm:
-            config.validate({"language": "go"})
-        self.assertIn("migrate", str(cm.exception))
+            config.validate({"language": "go", "efficacy_threshold": 80})
+        self.assertEqual(cm.exception.exit_code, 2)
+        self.assertIn("version", str(cm.exception))
 
-    def test_v1_python_string_points_to_migrate(self):
+    def test_missing_or_wrong_version_exits_2(self):
+        for raw in ({"language": "go"}, {"version": 1, "language": "go"}, {"version": "2", "language": "go"}):
+            with self.assertRaises(QualityError) as cm:
+                config.validate(raw)
+            self.assertEqual(cm.exception.exit_code, 2)
+            self.assertIn("version 必須是 2", str(cm.exception))
+
+    def test_v1_key_with_version_2_exits_2_and_names_key(self):
         with self.assertRaises(QualityError) as cm:
-            config.validate(self.v2(python="/usr/bin/python3"))
-        self.assertIn("migrate", str(cm.exception))
+            config.validate(self.v2(efficacy_threshold=70))
+        self.assertEqual(cm.exception.exit_code, 2)
+        self.assertIn("efficacy_threshold", str(cm.exception))
 
     def test_unknown_keys_rejected(self):
         with self.assertRaises(QualityError) as cm:
@@ -121,91 +123,6 @@ class ConfigChecks(unittest.TestCase):
                     self.v2(mutation={"workers": 0}), self.v2(js={"test_runner": "mocha"})):
             with self.assertRaises(QualityError):
                 config.validate(raw)
-
-
-class MigrateChecks(unittest.TestCase):
-    """v1 → v2 設定對照表，每一列一個測試。"""
-
-    V1 = {"language": "go"}
-
-    def migrate(self, **extra):
-        v1 = dict(self.V1)
-        v1.update(extra)
-        v2 = config.migrate_config(v1)
-        config.validate(copy.deepcopy(v2))  # 轉出來的設定一定要能通過 v2 的驗證
-        return v2
-
-    def test_version(self):
-        self.assertEqual(self.migrate()["version"], 2)
-
-    def test_language_required(self):
-        with self.assertRaises(QualityError):
-            config.migrate_config({"base": "main"})
-
-    def test_language_copied(self):
-        self.assertEqual(self.migrate(language="python")["language"], "python")
-
-    def test_base_default_and_copy(self):
-        self.assertEqual(self.migrate()["base"], "origin/main")
-        self.assertEqual(self.migrate(base="origin/develop")["base"], "origin/develop")
-
-    def test_gates_are_v1_behaviour(self):
-        self.assertEqual(self.migrate()["gates"], ["test", "crap", "mutation"])
-
-    def test_exclude_default_and_copy(self):
-        self.assertEqual(self.migrate()["exclude"], ["tools/", "vendor/", "node_modules/"])
-        self.assertEqual(self.migrate(exclude=["gen/"])["exclude"], ["gen/"])
-
-    def test_crap_threshold(self):
-        self.assertEqual(self.migrate()["crap"]["threshold"], 12)
-        self.assertEqual(self.migrate(crap_threshold=15)["crap"]["threshold"], 15)
-
-    def test_efficacy_threshold(self):
-        self.assertEqual(self.migrate()["mutation"]["kill_rate_threshold"], 80)
-        self.assertEqual(self.migrate(efficacy_threshold=70)["mutation"]["kill_rate_threshold"], 70)
-
-    def test_mutant_coverage_threshold_keeps_v1_behaviour(self):
-        self.assertEqual(self.migrate()["mutation"]["reach_rate_threshold"], 0)  # 不自動調成 50
-        self.assertEqual(self.migrate(mutant_coverage_threshold=40)["mutation"]["reach_rate_threshold"], 40)
-
-    def test_python_mutant_timeout_only_for_python(self):
-        self.assertNotIn("timeout_seconds", self.migrate()["mutation"])
-        self.assertEqual(self.migrate(language="python", python_mutant_timeout=60)["mutation"]["timeout_seconds"], 60)
-        for language in ("go", "csharp", "js"):
-            notes = []
-            v2 = config.migrate_config({"language": language, "python_mutant_timeout": 60}, notes)
-            self.assertNotIn("timeout_seconds", v2["mutation"], language)
-            self.assertEqual(len(notes), 1, language)
-            self.assertIn("只對 Python 有效，已略過", notes[0])
-        notes = []
-        config.migrate_config({"language": "python", "python_mutant_timeout": 60}, notes)
-        self.assertEqual(notes, [])
-
-    def test_dotnet_solution(self):
-        self.assertNotIn("csharp", self.migrate())
-        self.assertEqual(self.migrate(dotnet_solution="A.sln")["csharp"], {"solution": "A.sln"})
-
-    def test_js_test_runner(self):
-        self.assertNotIn("js", self.migrate())
-        self.assertEqual(self.migrate(js_test_runner="vitest")["js"], {"test_runner": "vitest"})
-
-    def test_python_interpreter(self):
-        self.assertNotIn("python", self.migrate())
-        self.assertEqual(self.migrate(python="py/bin/python")["python"], {"interpreter": "py/bin/python"})
-
-    def test_unknown_v1_key_rejected(self):
-        with self.assertRaises(QualityError):
-            config.migrate_config({"language": "go", "efficiency_threshold": 80})
-
-    def test_already_v2_rejected(self):
-        with self.assertRaises(QualityError):
-            config.migrate_config({"version": 2, "language": "go"})
-
-    def test_same_verdict_as_v1_with_defaults(self):
-        # 沒有任何 v1 鍵時，v1 的判定是 CRAP 12、抓錯率 80、測到率不擋
-        cfg = config.validate(self.migrate())
-        self.assertEqual((cfg["crap"]["threshold"], cfg["mutation"]["kill_rate_threshold"],
-                          cfg["mutation"]["reach_rate_threshold"]), (12, 80, 0))
 
 
 class SchemaChecks(unittest.TestCase):

@@ -9,7 +9,6 @@
     python tools/quality/quality.py baseline                      # 量現況，寫成 docs/品質現況.md 和 .json
     python tools/quality/quality.py baseline --compare 舊.json    # 量完跟上一次的現況報告比較
     python tools/quality/quality.py compare 舊.json 新.json       # 只比較兩份現況報告，不量測
-    python tools/quality/quality.py migrate                       # v1 的 .quality.json 轉成 v2
 
 crap 和 mutation 不加 --base 時，檢查整個專案；加 --json 檔名，另外寫一份 JSON 報告。
 門檻、語言、排除目錄、啟用哪幾關（gates）寫在專案根目錄的 .quality.json。
@@ -52,15 +51,12 @@ def main(argv=None):
     p = sub.add_parser("compare", help="比較兩份現況報告（JSON），不量測")
     p.add_argument("old", metavar="舊.json")
     p.add_argument("new", metavar="新.json")
-    sub.add_parser("migrate", help="把 v1 的 .quality.json 轉成 v2")
     args = parser.parse_args(argv)
 
     # Windows 上執行目錄可能是 8.3 短檔名（例如 C:/Users/ALEXAN~1.LIN），Jest 在這種目錄下會找不到測試，
     # 其他工具回報的路徑也會跟執行目錄對不起來。先換成實際路徑，之後啟動的工具都會用這個目錄
     os.chdir(os.path.realpath(os.getcwd()))
     try:
-        if args.command == "migrate":
-            sys.exit(cmd_migrate())
         if args.command == "compare":
             sys.exit(cmd_compare(args))
         cfg = config.load_config()
@@ -256,15 +252,6 @@ def cmd_baseline(args, cfg, lang):
 def cmd_compare(args):
     """不量測，只讀兩份 baseline JSON 印出前後差。只呈現，不判定，結束碼一律 0（讀不了或格式不對是 2）。"""
     print("\n".join(baseline.compare_lines(baseline.load_report(args.old), baseline.load_report(args.new))))
-    return 0
-
-
-# ---------- v1 → v2 ----------
-
-def cmd_migrate():
-    diff = config.migrate_file()
-    print("已把 {} 轉成 v2 格式。變更如下：\n".format(config.CONFIG_FILE))
-    print(diff)
     return 0
 
 
