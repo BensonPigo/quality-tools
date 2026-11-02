@@ -2,6 +2,14 @@
 
 每一版寫三件事：改了什麼、原本通過的專案會不會變成沒過、專案 repo 要不要跟著改設定。版本號的規則見 README 的「改版流程」。
 
+## v2.0.1
+
+- reusable workflow 的 `dotnet-version` 預設從 `8.0.x` 改成 `10.0.x`，範本 `workflows/csharp.yml` 從 `9.0.x` 改成 `10.0.x`，跟 selftest 驗證過的 .NET SDK 一致。專案有指定 `dotnet-version` 的不受影響。
+- reusable workflow：`tools/quality` 已經有檔案（直接複製進專案的工具）時，印出原因後停下。之前一樣會失敗，只是訊息是 `rmdir` 的錯誤。
+- README 的結束碼說明、CHANGELOG v2.0.0 的 `version` 說明改正，程式行為沒變。
+
+原本通過的專案不會變成沒過，`.quality.json` 不用改。用 reusable workflow 的專案，`uses:` 和 `tools-ref` 一起改成 `v2.0.1`。
+
 ## v2.0.0
 
 整個重寫成 `qtools` 套件。量測算法沿用 v1.0.0：圈複雜度規則、覆蓋率口徑、CRAP 公式、「改到函式」的判斷都沒有改。**預設值下，分數跟 v1.0.0 一致**：`dev/v1_parity.py check` 在五個範例專案上，CRAP 表每一列，以及抓到 + 逾時、沒抓到、測試沒跑到三個數字，都跟 v1.0.0 的記錄相同。
