@@ -13,7 +13,7 @@
       ]
     },
     {
-      "name": "沒改東西：變異測試通過",
+      "name": "沒改東西：抓錯檢查通過",
       "run": [
         "mutation",
         "--base",
@@ -64,7 +64,7 @@
       ]
     },
     {
-      "name": "fee 的免運門檻改成 999：只測了 1000 元，邊界的突變體存活，效能門檻 100 時沒過",
+      "name": "fee 的免運門檻改成 999：只測了 1000 元，邊界的改壞版本沒抓到，抓錯率門檻 100 時沒過",
       "edits": [
         {
           "file": "src/Shop/Shipping/Fee.cs",
@@ -73,8 +73,8 @@
         },
         {
           "file": ".quality.json",
-          "old": "\"efficacy_threshold\": 80",
-          "new": "\"efficacy_threshold\": 100"
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100"
         }
       ],
       "run": [
@@ -84,7 +84,8 @@
       ],
       "exit": 1,
       "contains": [
-        "LIVED",
+        "沒抓到",
+        "改成",
         "FAIL："
       ]
     },
@@ -117,6 +118,127 @@
         "main"
       ],
       "exit": 2
+    },
+    {
+      "name": "沒有 version 的設定檔：結束碼 2",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "content": "{\n  \"language\": \"csharp\",\n  \"base\": \"origin/main\",\n  \"crap_threshold\": 12,\n  \"efficacy_threshold\": 80,\n  \"mutant_coverage_threshold\": 0,\n  \"exclude\": [\"tools/\", \"vendor/\", \"node_modules/\"]\n}\n"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "version"
+      ]
+    },
+    {
+      "name": "設定檔有打錯字的鍵：結束碼 2，不會默默變成預設值",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"version\": 2,",
+          "new": "\"version\": 2,\n  \"gate\": [\"test\"],"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "不認得的鍵：gate"
+      ]
+    },
+    {
+      "name": "--json 輸出符合格式：crap 和 mutation 各一份",
+      "edits": [
+        {
+          "file": "src/Shop/Shipping/Fee.cs",
+          "old": "if (total >= 1000)",
+          "new": "if (total >= 999)"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "crap",
+            "--base",
+            "main",
+            "--json",
+            "out-crap.json"
+          ],
+          "exit": 0,
+          "json": "out-crap.json"
+        },
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main",
+            "--json",
+            "out-mut.json"
+          ],
+          "exit": 0,
+          "json": "out-mut.json"
+        }
+      ]
+    },
+    {
+      "name": "設定 workers 和 timeout_seconds：照常量測，設定寫進 JSON，專案裡不留 Stryker 設定檔",
+      "edits": [
+        {
+          "file": "src/Shop/Shipping/Fee.cs",
+          "old": "if (total >= 1000)",
+          "new": "if (total >= 999)"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0,\n    \"timeout_seconds\": 60,\n    \"workers\": 2"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main",
+            "--json",
+            "out-mut.json"
+          ],
+          "exit": [
+            0,
+            1
+          ],
+          "contains": [
+            "設定：逾時 60 秒、同時跑 2"
+          ],
+          "json": "out-mut.json",
+          "json_values": {
+            "mutation.settings": {
+              "timeout_seconds": 60,
+              "workers": 2,
+              "exclude_mutators": []
+            }
+          },
+          "no_files": [
+            "stryker-config*",
+            "stryker.config*"
+          ]
+        }
+      ]
     }
   ]
 }

@@ -1,3 +1,3 @@
-module doubleentry
+module exam
 
 go 1.27.3

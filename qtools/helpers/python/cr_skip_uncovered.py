@@ -1,14 +1,14 @@
-"""cosmic-ray 過濾器：把落在沒被測試執行到的行上的突變體標成略過，不用真的去跑。
+"""cosmic-ray 過濾器：把落在沒被測試執行到的行上的改壞版本標成略過，不用真的去跑。
 
-用法（由 lang_python.py 呼叫，要用裝了 cosmic-ray 的 Python 執行）：
+用法（由 qtools/langs/python.py 呼叫，要用裝了 cosmic-ray 的 Python 執行）：
 
     python cr_skip_uncovered.py <session.sqlite> <executed.json>
 
 executed.json 的格式是 {檔案相對路徑: [執行到的行號, ...]}，行號來自 coverage.py，
-是每個敘述的第一行。突變體可能落在跨多行敘述的中間，所以先找出包住它的最內層敘述，
+是每個敘述的第一行。改壞的版本可能落在跨多行敘述的中間，所以先找出包住它的最內層敘述，
 再看那個敘述的第一行有沒有執行到。
 
-被略過的突變體，output 會標上 NOT_COVERED_MARK，lang_python.py 據此歸類成「沒覆蓋」。
+被略過的改壞版本，output 會標上 NOT_COVERED_MARK，qtools/langs/python.py 據此歸類成「測試沒跑到」。
 """
 
 import ast
@@ -38,7 +38,7 @@ def main(session, executed_path):
                 skip.append(item.job_id)
         if skip:
             db.set_multiple_results(skip, WorkResult(output=NOT_COVERED_MARK, worker_outcome=WorkerOutcome.SKIPPED))
-    print("略過 {} 個沒被測試執行到的突變體".format(len(skip)), file=sys.stderr)
+    print("略過 {} 個測試沒跑到的改壞版本".format(len(skip)), file=sys.stderr)
 
 
 def _statement_ranges(file):

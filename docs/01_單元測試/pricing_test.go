@@ -2,10 +2,10 @@ package pricing
 
 import "testing"
 
-// 貸方帳本：記錄「應該算出多少」。
+// 答案卷：題目和「應該算出多少」的標準答案。
 //
-// 每個 want（正確答案）都是人依照「規格」親手算出的寫死數字，
-// 不呼叫任何實作程式碼，因此與借方帳本彼此獨立。
+// 每個 want（標準答案）都是人依照「規格」親手算出的寫死數字，
+// 不呼叫任何實作程式碼，因此不會跟著學生作答一起錯。
 func TestFinalPrice(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -26,7 +26,7 @@ func TestFinalPrice(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := FinalPrice(tt.price, tt.qty, tt.isMember)
 			if got != tt.want {
-				t.Errorf("FinalPrice(%d, %d, %v) = %d，規格要求 %d（借貸不平）",
+				t.Errorf("FinalPrice(%d, %d, %v) = %d，規格要求 %d（答錯了）",
 					tt.price, tt.qty, tt.isMember, got, tt.want)
 			}
 		})

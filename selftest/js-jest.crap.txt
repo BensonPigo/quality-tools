@@ -1,4 +1,4 @@
-CRAP     C      Cover    Func                     Pos
+CRAP     C      覆蓋率      函式                       位置
 12.0     3      0.0%     weight                   lib/shipping/fee.js:13   
 4.9      3      40.0%    fee                      lib/shipping/fee.js:2   
 

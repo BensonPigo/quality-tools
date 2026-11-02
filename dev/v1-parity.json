@@ -1,0 +1,216 @@
+{
+  "v1_ref": "v1.0.0",
+  "samples": {
+    "csharp": {
+      "crap": [
+        [
+          "30.0",
+          5,
+          "0.0",
+          "Fees.Weight",
+          "src/Shop/Shipping/Fee.cs:20"
+        ],
+        [
+          "26.1",
+          14,
+          "60.5",
+          "Cart.Checkout",
+          "src/Shop/Checkout.cs:10"
+        ],
+        [
+          "3.8",
+          3,
+          "55.6",
+          "Fees.Fee",
+          "src/Shop/Shipping/Fee.cs:6"
+        ],
+        [
+          "2.0",
+          1,
+          "0.0",
+          "Calc.Add",
+          "src/NoTest/Calc.cs:5"
+        ],
+        [
+          "2.0",
+          1,
+          "0.0",
+          "Fees.Double",
+          "src/Shop/Shipping/Fee.cs:41"
+        ]
+      ],
+      "mutation": {
+        "killed": 21,
+        "timed_out": 0,
+        "lived": 10,
+        "not_covered": 30
+      }
+    },
+    "go": {
+      "crap": [
+        [
+          "30.0",
+          5,
+          "0.0",
+          "Weight",
+          "shipping/fee.go:15"
+        ],
+        [
+          "17.5",
+          14,
+          "73.9",
+          "Checkout",
+          "checkout.go:31"
+        ],
+        [
+          "4.9",
+          3,
+          "40.0",
+          "Fee",
+          "shipping/fee.go:4"
+        ],
+        [
+          "2.0",
+          1,
+          "0.0",
+          "Add",
+          "notest/add.go:3"
+        ]
+      ],
+      "mutation": {
+        "killed": 12,
+        "timed_out": 0,
+        "lived": 10,
+        "not_covered": 14
+      }
+    },
+    "js-jest": {
+      "crap": [
+        [
+          "12.0",
+          3,
+          "0.0",
+          "weight",
+          "lib/shipping/fee.js:13"
+        ],
+        [
+          "4.9",
+          3,
+          "40.0",
+          "fee",
+          "lib/shipping/fee.js:2"
+        ]
+      ],
+      "mutation": {
+        "killed": 6,
+        "timed_out": 0,
+        "lived": 1,
+        "not_covered": 16
+      }
+    },
+    "python": {
+      "crap": [
+        [
+          "30.0",
+          5,
+          "0.0",
+          "weight",
+          "shop/shipping/fee.py:10"
+        ],
+        [
+          "17.5",
+          14,
+          "73.9",
+          "checkout",
+          "shop/checkout.py:19"
+        ],
+        [
+          "6.0",
+          2,
+          "0.0",
+          "Box.label",
+          "shop/shipping/fee.py:27"
+        ],
+        [
+          "4.9",
+          3,
+          "40.0",
+          "fee",
+          "shop/shipping/fee.py:1"
+        ],
+        [
+          "2.0",
+          1,
+          "0.0",
+          "add",
+          "shop/notest/calc.py:1"
+        ],
+        [
+          "2.0",
+          1,
+          "0.0",
+          "Box.__init__",
+          "shop/shipping/fee.py:24"
+        ]
+      ],
+      "mutation": {
+        "killed": 84,
+        "timed_out": 0,
+        "lived": 53,
+        "not_covered": 132
+      }
+    },
+    "ts-vitest": {
+      "crap": [
+        [
+          "30.0",
+          5,
+          "0.0",
+          "weight",
+          "src/shipping/fee.ts:13"
+        ],
+        [
+          "17.5",
+          14,
+          "73.9",
+          "checkout",
+          "src/checkout.ts:6"
+        ],
+        [
+          "6.0",
+          2,
+          "0.0",
+          "Box.label",
+          "src/shipping/fee.ts:32"
+        ],
+        [
+          "4.9",
+          3,
+          "40.0",
+          "fee",
+          "src/shipping/fee.ts:2"
+        ],
+        [
+          "2.0",
+          1,
+          "0.0",
+          "add",
+          "src/notest/calc.ts:1"
+        ],
+        [
+          "2.0",
+          1,
+          "0.0",
+          "Box.constructor",
+          "src/shipping/fee.ts:30"
+        ]
+      ],
+      "mutation": {
+        "killed": 31,
+        "timed_out": 0,
+        "lived": 26,
+        "not_covered": 50
+      }
+    }
+  }
+}

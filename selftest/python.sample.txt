@@ -7,12 +7,18 @@ __pycache__/
 
 --- file: .quality.json
 {
+  "version": 2,
   "language": "python",
   "base": "origin/main",
-  "crap_threshold": 12,
-  "efficacy_threshold": 80,
-  "mutant_coverage_threshold": 0,
-  "exclude": ["tools/", "vendor/", "node_modules/"]
+  "gates": ["test", "crap", "mutation"],
+  "exclude": ["tools/", "vendor/", "node_modules/"],
+  "crap": {
+    "threshold": 12
+  },
+  "mutation": {
+    "kill_rate_threshold": 80,
+    "reach_rate_threshold": 0
+  }
 }
 
 --- file: pyproject.toml

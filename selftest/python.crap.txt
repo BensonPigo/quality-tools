@@ -1,4 +1,4 @@
-CRAP     C      Cover    Func                     Pos
+CRAP     C      覆蓋率      函式                       位置
 30.0     5      0.0%     weight                   shop/shipping/fee.py:10 ❌
 17.5     14     73.9%    checkout                 shop/checkout.py:19 ❌
 6.0      2      0.0%     Box.label                shop/shipping/fee.py:27   

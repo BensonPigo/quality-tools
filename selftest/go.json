@@ -13,7 +13,7 @@
       ]
     },
     {
-      "name": "沒改東西：變異測試通過",
+      "name": "沒改東西：抓錯檢查通過",
       "run": [
         "mutation",
         "--base",
@@ -64,7 +64,7 @@
       ]
     },
     {
-      "name": "fee 的免運門檻改成 999：只測了 1000 元，邊界的突變體存活，效能門檻 100 時沒過",
+      "name": "fee 的免運門檻改成 999：只測了 1000 元，邊界的改壞版本沒抓到，抓錯率門檻 100 時沒過",
       "edits": [
         {
           "file": "shipping/fee.go",
@@ -73,8 +73,8 @@
         },
         {
           "file": ".quality.json",
-          "old": "\"efficacy_threshold\": 80",
-          "new": "\"efficacy_threshold\": 100"
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100"
         }
       ],
       "run": [
@@ -84,7 +84,8 @@
       ],
       "exit": 1,
       "contains": [
-        "LIVED",
+        "沒抓到",
+        "把 `>=` 改成 `>`",
         "FAIL："
       ]
     },
@@ -135,6 +136,817 @@
       "contains": [
         "共 1 個",
         "Sub"
+      ]
+    },
+    {
+      "name": "沒有 version 的設定檔：結束碼 2",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "content": "{\n  \"language\": \"go\",\n  \"base\": \"origin/main\",\n  \"crap_threshold\": 12,\n  \"efficacy_threshold\": 80,\n  \"mutant_coverage_threshold\": 0,\n  \"exclude\": [\"tools/\", \"vendor/\", \"node_modules/\"]\n}\n"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "version"
+      ]
+    },
+    {
+      "name": "設定檔有打錯字的鍵：結束碼 2，不會默默變成預設值",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"version\": 2,",
+          "new": "\"version\": 2,\n  \"gate\": [\"test\"],"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "不認得的鍵：gate"
+      ]
+    },
+    {
+      "name": "--json 輸出符合格式：crap 和 mutation 各一份",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "crap",
+            "--base",
+            "main",
+            "--json",
+            "out-crap.json"
+          ],
+          "exit": 0,
+          "json": "out-crap.json"
+        },
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main",
+            "--json",
+            "out-mut.json"
+          ],
+          "exit": 0,
+          "json": "out-mut.json"
+        }
+      ]
+    },
+    {
+      "name": "排除清單列出該行沒抓到的改壞版本：改了也沒差，由沒過變成通過",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100"
+        },
+        {
+          "file": ".quality-equivalents.json",
+          "content": "[\n  {\n    \"file\": \"shipping/fee.go\",\n    \"function\": \"Fee\",\n    \"line_text\": \"if total >= 999 {\",\n    \"mutator\": \"CONDITIONALS_BOUNDARY\",\n    \"reason\": \"免運門檻 999 與 1000 在測試金額上無法區分，改成 > 後行為相同\",\n    \"approved_by\": \"selftest\"\n  }\n]\n"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main"
+      ],
+      "exit": 0,
+      "contains": [
+        "已排除：改了也沒差 1",
+        "PASS"
+      ],
+      "not_contains": [
+        "把 `>=` 改成 `>`",
+        "排除清單有"
+      ]
+    },
+    {
+      "name": "排除清單有一項缺 reason：結束碼 2，指出第幾項",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100"
+        },
+        {
+          "file": ".quality-equivalents.json",
+          "content": "[{\"file\": \"shipping/fee.go\", \"line_text\": \"if total >= 999 {\", \"mutator\": \"CONDITIONALS_BOUNDARY\", \"reason\": \"x\", \"approved_by\": \"a\"}, {\"file\": \"shipping/fee.go\", \"line_text\": \"if total >= 999 {\", \"mutator\": \"CONDITIONALS_NEGATION\", \"approved_by\": \"a\"}]\n"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "第 2 項缺少必填欄位 reason"
+      ]
+    },
+    {
+      "name": "排除清單多一項不存在的行：列出沒用到，不影響結束碼",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100"
+        },
+        {
+          "file": ".quality-equivalents.json",
+          "content": "[{\"file\": \"shipping/fee.go\", \"line_text\": \"if total >= 999 {\", \"mutator\": \"CONDITIONALS_BOUNDARY\", \"reason\": \"x\", \"approved_by\": \"a\"}, {\"file\": \"shipping/fee.go\", \"line_text\": \"if total >= 12345 {\", \"mutator\": \"CONDITIONALS_BOUNDARY\", \"reason\": \"x\", \"approved_by\": \"a\"}]\n"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main",
+        "--json",
+        "out-mut.json"
+      ],
+      "exit": 0,
+      "contains": [
+        "排除清單有 1 項沒用到",
+        "if total >= 12345 {"
+      ],
+      "json": "out-mut.json"
+    },
+    {
+      "name": "exclude_mutators 設成沒抓到的改法：已排除，結果由沒過變成通過",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 100,\n    \"exclude_mutators\": [\"CONDITIONALS_BOUNDARY\"]"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main"
+      ],
+      "exit": 0,
+      "contains": [
+        "已排除：設定排除的改法 1",
+        "排除改法 CONDITIONALS_BOUNDARY",
+        "PASS"
+      ]
+    },
+    {
+      "name": "設定 workers 和 timeout_seconds：照常量測，設定寫進 JSON，Go 對 timeout 印警告",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0,\n    \"timeout_seconds\": 60,\n    \"workers\": 2"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main",
+            "--json",
+            "out-mut.json"
+          ],
+          "exit": [
+            0,
+            1
+          ],
+          "contains": [
+            "不支援 timeout_seconds",
+            "設定：逾時 60 秒、同時跑 2"
+          ],
+          "json": "out-mut.json",
+          "json_values": {
+            "mutation.settings": {
+              "timeout_seconds": 60,
+              "workers": 2,
+              "exclude_mutators": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "gates 只有 test：單獨執行 crap 印「還沒啟用」，結束碼 0，JSON 的 result 是 skipped",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"gates\": [\"test\", \"crap\", \"mutation\"]",
+          "new": "\"gates\": [\"test\"]"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main",
+        "--json",
+        "out-crap.json"
+      ],
+      "exit": 0,
+      "contains": [
+        "第 2 關（crap）還沒啟用"
+      ],
+      "not_contains": [
+        "CRAP     C"
+      ],
+      "json": "out-crap.json",
+      "json_values": {
+        "result": "skipped"
+      }
+    },
+    {
+      "name": "gates 只有 test：單獨執行 mutation 也是還沒啟用，JSON 的 result 是 skipped",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"gates\": [\"test\", \"crap\", \"mutation\"]",
+          "new": "\"gates\": [\"test\"]"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main",
+        "--json",
+        "out-mut.json"
+      ],
+      "exit": 0,
+      "contains": [
+        "第 3 關（mutation）還沒啟用"
+      ],
+      "json": "out-mut.json",
+      "json_values": {
+        "result": "skipped"
+      }
+    },
+    {
+      "name": "check：測試失敗時停在第 1 關，結束碼 1，沒有 CRAP 表",
+      "edits": [
+        {
+          "file": "shipping/fee_test.go",
+          "old": "got != 0 {",
+          "new": "got != 5 {"
+        }
+      ],
+      "run": [
+        "check",
+        "--base",
+        "main"
+      ],
+      "exit": 1,
+      "contains": [
+        "停在第 1 關"
+      ],
+      "not_contains": [
+        "CRAP     C",
+        "== 第 2 關"
+      ]
+    },
+    {
+      "name": "check：沒改東西，三關依序跑完",
+      "run": [
+        "check",
+        "--base",
+        "main"
+      ],
+      "exit": 0,
+      "in_order": [
+        "比較基準：main",
+        "== 第 1 關",
+        "== 第 2 關",
+        "== 第 3 關",
+        "PASS：已啟用的 3 關都通過"
+      ]
+    },
+    {
+      "name": "check --skip mutation：不跑第 3 關",
+      "run": [
+        "check",
+        "--base",
+        "main",
+        "--skip",
+        "mutation"
+      ],
+      "exit": 0,
+      "contains": [
+        "== 第 2 關",
+        "略過：mutation"
+      ],
+      "not_contains": [
+        "第 3 關"
+      ]
+    },
+    {
+      "name": "check --skip mutation：改到沒測試的舊函式 weight，停在第 2 關",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "return 50",
+          "new": "return 55"
+        }
+      ],
+      "run": [
+        "check",
+        "--base",
+        "main",
+        "--skip",
+        "mutation"
+      ],
+      "exit": 1,
+      "contains": [
+        "覆蓋率要到 35%",
+        "停在第 2 關"
+      ],
+      "not_contains": [
+        "第 3 關"
+      ]
+    },
+    {
+      "name": "gates 寫成 mutation、test：照固定順序跑，不帶 --base 用設定檔的 base，crap 還沒啟用",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"main\""
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"gates\": [\"test\", \"crap\", \"mutation\"]",
+          "new": "\"gates\": [\"mutation\", \"test\"]"
+        }
+      ],
+      "run": [
+        "check"
+      ],
+      "exit": 0,
+      "in_order": [
+        "比較基準：main",
+        "== 第 1 關",
+        "== 第 3 關",
+        "還沒啟用：crap"
+      ],
+      "not_contains": [
+        "== 第 2 關"
+      ]
+    },
+    {
+      "name": "check --json 目錄：crap.json 和 mutation.json 通過格式比對，不寫 test.json",
+      "steps": [
+        {
+          "run": [
+            "check",
+            "--base",
+            "main",
+            "--json",
+            "out"
+          ],
+          "exit": 0,
+          "json": [
+            "out/crap.json",
+            "out/mutation.json"
+          ],
+          "no_files": [
+            "test.json"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "check --json 目錄：測試失敗，停在第 1 關，目錄底下沒有任何 json",
+      "edits": [
+        {
+          "file": "shipping/fee_test.go",
+          "old": "got != 0 {",
+          "new": "got != 5 {"
+        }
+      ],
+      "run": [
+        "check",
+        "--base",
+        "main",
+        "--json",
+        "out2"
+      ],
+      "exit": 1,
+      "contains": [
+        "停在第 1 關"
+      ],
+      "no_files": [
+        "crap.json",
+        "mutation.json",
+        "test.json"
+      ]
+    },
+    {
+      "name": "check --skip 給不認得的名稱：結束碼 2",
+      "run": [
+        "check",
+        "--base",
+        "main",
+        "--skip",
+        "foo"
+      ],
+      "exit": 2,
+      "contains": [
+        "不認得的關：foo"
+      ]
+    },
+    {
+      "name": "gate.sh：沒改東西（base 的改動已 commit），放行（結束碼 0）",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "git commit -qam base-main"
+          ],
+          "exit": 0
+        },
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 0
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"main\""
+        }
+      ]
+    },
+    {
+      "name": "gate.sh：沒改東西時不檢查工具在不在（刪掉 tools/quality/quality.py 並 commit，仍放行）",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "rm -f tools/quality/quality.py && git add -A && git commit -qm drop-tool"
+          ],
+          "exit": 0
+        },
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 0
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"main\""
+        }
+      ]
+    },
+    {
+      "name": "gate.sh：改舊函式 weight，CRAP 沒過，結束碼 2，提示覆蓋率要到 35%",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 2,
+          "contains": [
+            "第二關沒過",
+            "覆蓋率要到 35%"
+          ]
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"main\""
+        },
+        {
+          "file": "shipping/fee.go",
+          "old": "return 50",
+          "new": "return 55"
+        }
+      ]
+    },
+    {
+      "name": "gate.sh：測試失敗，結束碼 2",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 2,
+          "contains": [
+            "第一關沒過"
+          ]
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"main\""
+        },
+        {
+          "file": "shipping/fee_test.go",
+          "old": "got != 0 {",
+          "new": "got != 5 {"
+        }
+      ]
+    },
+    {
+      "name": "gate.sh：沒有 tools/quality/quality.py 又有改檔案，結束碼 2，提示 git submodule update --init",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "rm -f tools/quality/quality.py"
+          ],
+          "exit": 0
+        },
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 2,
+          "contains": [
+            "git submodule update --init"
+          ]
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"main\""
+        },
+        {
+          "file": "shipping/fee.go",
+          "old": "return 50",
+          "new": "return 55"
+        }
+      ]
+    },
+    {
+      "name": "gate.sh：base 是不存在的分支，找不到基準就放行",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 0
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"origin/nope\""
+        },
+        {
+          "file": "shipping/fee.go",
+          "old": "return 50",
+          "new": "return 55"
+        }
+      ]
+    },
+    {
+      "name": "gate.sh：base 是不存在的分支，但 QUALITY_BASE=main 覆蓋，照樣檢查，結束碼 2",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "{gate_sh}"
+          ],
+          "exit": 2,
+          "contains": [
+            "覆蓋率要到 35%"
+          ],
+          "env": {
+            "QUALITY_BASE": "main"
+          }
+        }
+      ],
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"base\": \"origin/main\"",
+          "new": "\"base\": \"origin/nope\""
+        },
+        {
+          "file": "shipping/fee.go",
+          "old": "return 50",
+          "new": "return 55"
+        }
+      ]
+    },
+    {
+      "name": "baseline：Weight 建立後改過兩次，修改次數 2，達到 hot_churn 標優先處理；Checkout 超標但沒改過，修改次數 0",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"language\": \"go\",",
+          "new": "\"language\": \"go\",\n  \"baseline\": {\"hot_churn\": 2},"
+        },
+        {
+          "file": "shipping/fee.go",
+          "old": "\tif kg > 20 {",
+          "new": "\t// v1\n\tif kg > 20 {"
+        }
+      ],
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "git add -A && git commit -qm weight-v1"
+          ],
+          "exit": 0
+        },
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "sed -i 's|// v1|// v2|' shipping/fee.go && git commit -qam weight-v2"
+          ],
+          "exit": 0
+        },
+        {
+          "run": [
+            "baseline",
+            "--out",
+            "docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "docs/q.json"
+          ],
+          "json": "docs/q.json",
+          "json_values": {
+            "command": "baseline",
+            "result": "pass",
+            "crap.functions.0.name": "Weight",
+            "crap.functions.0.churn": 2,
+            "crap.functions.0.hot": true,
+            "crap.functions.name=Checkout.churn": 0,
+            "crap.functions.name=Checkout.hot": false,
+            "crap.functions.name=Fee.churn": null,
+            "crap.functions.name=Fee.hot": false
+          }
+        },
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "cat docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "優先處理 1",
+            "| 修改次數 |"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "情境隔離：前一個情境做的 commit 不會留下來，repo 只有初始 commit",
+      "steps": [
+        {
+          "shell": [
+            "git",
+            "rev-list",
+            "--count",
+            "HEAD"
+          ],
+          "exit": 0,
+          "equals": "1"
+        }
+      ]
+    },
+    {
+      "name": "baseline --compare 舊報告：markdown 多一節「跟上一次比較」；compare 印出前後差；compare 讀到不是現況報告的 JSON 結束碼 2",
+      "edits": [
+        {
+          "file": "old.json",
+          "content": "{\n  \"schema\": 1,\n  \"command\": \"baseline\",\n  \"tool_version\": \"2.0.0\",\n  \"language\": \"go\",\n  \"base\": null,\n  \"commit\": \"0000000000000000000000000000000000000000\",\n  \"result\": \"pass\",\n  \"tools\": {\n    \"go\": \"1.27\"\n  },\n  \"crap\": {\n    \"threshold\": 12,\n    \"untouched_over\": 0,\n    \"functions\": [\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Weight\",\n        \"start\": 15,\n        \"end\": 28,\n        \"complexity\": 5,\n        \"coverage\": 0.0,\n        \"crap\": 30.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 35,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"checkout.go\",\n        \"name\": \"Checkout\",\n        \"start\": 31,\n        \"end\": 70,\n        \"complexity\": 14,\n        \"coverage\": 0.739,\n        \"crap\": 17.5,\n        \"over\": true,\n        \"advice\": \"split\",\n        \"need_coverage\": null,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Fee\",\n        \"start\": 4,\n        \"end\": 13,\n        \"complexity\": 3,\n        \"coverage\": 0.4,\n        \"crap\": 13.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 60,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"notest/add.go\",\n        \"name\": \"Add\",\n        \"start\": 3,\n        \"end\": 5,\n        \"complexity\": 1,\n        \"coverage\": 0.0,\n        \"crap\": 2.0,\n        \"over\": false,\n        \"advice\": null,\n        \"need_coverage\": null,\n        \"churn\": null,\n        \"hot\": false\n      }\n    ]\n  },\n  \"mutation\": {\n    \"kill_rate_threshold\": 80,\n    \"reach_rate_threshold\": 0,\n    \"counts\": {\n      \"KILLED\": 8,\n      \"TIMED_OUT\": 0,\n      \"LIVED\": 6,\n      \"NOT_COVERED\": 0,\n      \"EQUIVALENT\": 0,\n      \"EXCLUDED_MUTATOR\": 0,\n      \"NOT_VIABLE\": 0,\n      \"SKIPPED\": 0\n    },\n    \"kill_rate\": 57.142857142857146,\n    \"reach_rate\": 100.0,\n    \"mutants\": [],\n    \"packages\": [\n      {\n        \"package\": \"shipping\",\n        \"counts\": {\n          \"KILLED\": 5,\n          \"TIMED_OUT\": 0,\n          \"LIVED\": 5,\n          \"NOT_COVERED\": 0,\n          \"EQUIVALENT\": 0,\n          \"EXCLUDED_MUTATOR\": 0,\n          \"NOT_VIABLE\": 0,\n          \"SKIPPED\": 0\n        },\n        \"kill_rate\": 50.0,\n        \"reach_rate\": 100.0\n      },\n      {\n        \"package\": \"legacy\",\n        \"counts\": {\n          \"KILLED\": 3,\n          \"TIMED_OUT\": 0,\n          \"LIVED\": 1,\n          \"NOT_COVERED\": 0,\n          \"EQUIVALENT\": 0,\n          \"EXCLUDED_MUTATOR\": 0,\n          \"NOT_VIABLE\": 0,\n          \"SKIPPED\": 0\n        },\n        \"kill_rate\": 75.0,\n        \"reach_rate\": 100.0\n      }\n    ],\n    \"settings\": {\n      \"timeout_seconds\": null,\n      \"workers\": null,\n      \"exclude_mutators\": []\n    },\n    \"unused_equivalents\": []\n  }\n}\n"
+        },
+        {
+          "file": "bad.json",
+          "content": "{\n  \"schema\": 1,\n  \"command\": \"crap\",\n  \"tool_version\": \"2.0.0\",\n  \"language\": \"go\",\n  \"base\": null,\n  \"commit\": \"0000000000000000000000000000000000000000\",\n  \"result\": \"pass\",\n  \"tools\": {\n    \"go\": \"1.27\"\n  },\n  \"crap\": {\n    \"threshold\": 12,\n    \"untouched_over\": 0,\n    \"functions\": [\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Weight\",\n        \"start\": 15,\n        \"end\": 28,\n        \"complexity\": 5,\n        \"coverage\": 0.0,\n        \"crap\": 30.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 35,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"checkout.go\",\n        \"name\": \"Checkout\",\n        \"start\": 31,\n        \"end\": 70,\n        \"complexity\": 14,\n        \"coverage\": 0.739,\n        \"crap\": 17.5,\n        \"over\": true,\n        \"advice\": \"split\",\n        \"need_coverage\": null,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"shipping/fee.go\",\n        \"name\": \"Fee\",\n        \"start\": 4,\n        \"end\": 13,\n        \"complexity\": 3,\n        \"coverage\": 0.4,\n        \"crap\": 13.0,\n        \"over\": true,\n        \"advice\": \"cover\",\n        \"need_coverage\": 60,\n        \"churn\": 0,\n        \"hot\": false\n      },\n      {\n        \"file\": \"notest/add.go\",\n        \"name\": \"Add\",\n        \"start\": 3,\n        \"end\": 5,\n        \"complexity\": 1,\n        \"coverage\": 0.0,\n        \"crap\": 2.0,\n        \"over\": false,\n        \"advice\": null,\n        \"need_coverage\": null,\n        \"churn\": null,\n        \"hot\": false\n      }\n    ]\n  },\n  \"mutation\": null\n}\n"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "baseline",
+            "--out",
+            "docs/q.md",
+            "--compare",
+            "old.json"
+          ],
+          "exit": 0,
+          "contains": [
+            "跟上一次比較",
+            "超標函式數：3 → 2（-1）",
+            "套件 legacy：已移除"
+          ],
+          "json": "docs/q.json"
+        },
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "cat docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "## 跟上一次比較",
+            "超標函式數：3 → 2"
+          ]
+        },
+        {
+          "run": [
+            "compare",
+            "old.json",
+            "docs/q.json"
+          ],
+          "exit": 0,
+          "contains": [
+            "→",
+            "超標函式數：3 → 2（-1）",
+            "整體抓錯率：",
+            "套件 shipping：抓錯率"
+          ]
+        },
+        {
+          "run": [
+            "compare",
+            "bad.json",
+            "docs/q.json"
+          ],
+          "exit": 2,
+          "contains": [
+            "不是現況報告"
+          ]
+        }
       ]
     }
   ]

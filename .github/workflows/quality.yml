@@ -1,0 +1,124 @@
+# quality-tools 的 reusable workflow：呼叫端用一行 uses 引用，三道檢查（單元測試、CRAP、抓錯檢查）自動跑。
+# 呼叫端的 `uses: <擁有者>/quality-tools/.github/workflows/quality.yml@<ref>` 和 `with.tools-ref`
+# 必須填同一個 ref（例如 v2.0.0），兩處要一起改。GitHub 沒有提供被呼叫的 workflow 查自己 ref 的方式，所以要呼叫端明寫。
+name: quality
+
+on:
+  workflow_call:
+    inputs:
+      language:
+        description: go、csharp、js 或 python
+        type: string
+        required: true
+      tools-ref:
+        description: quality-tools 的版本（tag 或 commit），要和 uses 後面的 ref 相同
+        type: string
+        required: true
+      tools-repository:
+        description: quality-tools 所在的 repo，預設是呼叫端同一個擁有者底下的 quality-tools
+        type: string
+        default: ""
+      go-version-file:
+        type: string
+        default: go.mod
+      dotnet-version:
+        type: string
+        default: 8.0.x
+      node-version:
+        type: string
+        default: "22" # StrykerJS 10 需要 Node 22 以上
+      python-version:
+        type: string
+        default: "3.12"
+      install:
+        description: 安裝專案相依套件的指令，例如 npm ci
+        type: string
+        default: ""
+      skip:
+        description: 不跑的關，空白分隔，例如 mutation
+        type: string
+        default: ""
+    secrets:
+      tools-token:
+        description: quality-tools 是私有 repo 時，能讀它的存取權杖
+        required: false
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 要比對 git 歷史才知道改了哪些地方
+          submodules: false # quality-tools 是私有 repo 時預設權杖讀不到 submodule，工具改由下面的步驟取得
+
+      - if: ${{ inputs.language == 'go' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ inputs.go-version-file }}
+
+      - if: ${{ inputs.language == 'csharp' }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - if: ${{ inputs.language == 'js' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - if: ${{ inputs.language == 'python' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: 安裝專案相依套件
+        if: ${{ inputs.install != '' }}
+        env:
+          INSTALL_CMD: ${{ inputs.install }}
+        run: bash -c "$INSTALL_CMD"
+
+      - name: 取得工具版本
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tools-repository || format('{0}/quality-tools', github.repository_owner) }}
+          ref: ${{ inputs.tools-ref }}
+          token: ${{ secrets.tools-token || github.token }}
+          path: .quality-tools-pin
+
+      - name: 準備工具
+        run: |
+          set -euo pipefail
+          pin_sha=$(git -C .quality-tools-pin rev-parse HEAD)
+          link=$(git ls-tree HEAD tools/quality)
+          mode=${link%% *}
+          if [ "$mode" = "160000" ]; then
+            recorded=$(printf '%s' "$link" | awk '{print $3}')
+            if [ "$recorded" != "$pin_sha" ]; then
+              echo "submodule 記錄的版本和 tools-ref 不一致：tools/quality 記錄 $recorded，tools-ref 是 $pin_sha" >&2
+              exit 1
+            fi
+          fi
+          if [ -d tools/quality ]; then
+            rmdir tools/quality
+          fi
+          mkdir -p tools
+          mv .quality-tools-pin tools/quality
+          test -f tools/quality/quality.py
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/quality-tools
+          key: quality-tools-${{ runner.os }}-${{ inputs.language }}-${{ hashFiles('tools/quality/qtools/helpers/**', 'tools/quality/qtools/langs/**') }}
+
+      - name: 第一關：單元測試
+        if: ${{ !contains(format(' {0} ', inputs.skip), ' test ') }}
+        run: python3 tools/quality/quality.py test
+
+      - name: 第二關：CRAP
+        if: ${{ !contains(format(' {0} ', inputs.skip), ' crap ') }}
+        run: python3 tools/quality/quality.py crap --base origin/${{ github.base_ref }}
+
+      - name: 第三關：抓錯檢查
+        if: ${{ !contains(format(' {0} ', inputs.skip), ' mutation ') }}
+        run: python3 tools/quality/quality.py mutation --base origin/${{ github.base_ref }}
