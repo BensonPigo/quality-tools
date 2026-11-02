@@ -14,7 +14,7 @@
 
 ### 不相容的地方
 
-1. **`.quality.json` 要改成 v2 格式。** 一定要有 `"version": 2`；沒有 `version` 或不是 2，所有指令都以結束碼 2 結束，訊息是「.quality.json 的 version 必須是 2」。v1 的鍵名屬於不認得的鍵，同樣以結束碼 2 結束。照下表的鍵名手動改：
+1. **`.quality.json` 要改成 v2 格式。** 一定要有 `"version": 2`；沒有 `version` 或不是 2，`test`、`crap`、`mutation`、`check`、`baseline` 都以結束碼 2 結束，訊息是「.quality.json 的 version 必須是 2」。v1 的鍵名屬於不認得的鍵，同樣以結束碼 2 結束。照下表的鍵名手動改：
 
    | v1 | v2 |
    |---|---|

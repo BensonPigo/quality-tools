@@ -23,7 +23,7 @@ on:
         default: go.mod
       dotnet-version:
         type: string
-        default: 8.0.x
+        default: 10.0.x # 跟 selftest 驗證過的 .NET SDK 一致
       node-version:
         type: string
         default: "22" # StrykerJS 10 需要 Node 22 以上
@@ -100,6 +100,11 @@ jobs:
             fi
           fi
           if [ -d tools/quality ]; then
+            # submodule 沒 checkout 時是空目錄；有檔案代表工具是直接複製進專案的，跟 tools-ref 可能不同版本
+            if [ -n "$(ls -A tools/quality)" ]; then
+              echo "tools/quality 裡已經有檔案（直接複製進專案的工具）。用這個 workflow 時，請刪掉複製的工具，或改用 submodule" >&2
+              exit 1
+            fi
             rmdir tools/quality
           fi
           mkdir -p tools
