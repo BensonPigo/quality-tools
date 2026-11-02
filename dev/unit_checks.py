@@ -7,7 +7,6 @@ selftest.py 一開始會先跑這支。檔名刻意不符合 test_*.py、*_test.
 """
 
 import contextlib
-import copy
 import io
 import json
 import os

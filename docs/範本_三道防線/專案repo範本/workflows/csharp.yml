@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x # 改成專案用的版本；repo 有 global.json 的話，改用 global-json-file: global.json
+          dotnet-version: 10.0.x # 改成專案用的版本；repo 有 global.json 的話，改用 global-json-file: global.json
 
       # Stryker.NET 和 CsMetrics 第一次執行時會下載、建置，存起來下次就不用重來
       - uses: actions/cache@v4

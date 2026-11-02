@@ -120,8 +120,8 @@ quality-tools/
 | 碼 | 意思 |
 |---|---|
 | 0 | 通過 |
-| 1 | 沒過門檻 |
-| 2 | 量測失敗或設定有誤（例如測試沒過、工具執行失敗、`.quality.json` 有未知的鍵、排除清單格式錯誤、工具版本不在驗證清單） |
+| 1 | 沒過門檻；`test` 的測試沒過，以及 `check` 停在第一關，也是 1 |
+| 2 | 量測失敗或設定有誤（例如 `crap`、`mutation` 量測時測試沒過、工具執行失敗、`.quality.json` 有未知的鍵、排除清單格式錯誤、工具版本不在驗證清單） |
 
 `compare` 只呈現前後差，不判定，讀得了兩份報告就是 0；讀不了、格式不符、或不是現況報告是 2。
 
@@ -304,7 +304,7 @@ inputs：
 | `tools-ref` | 是 | | quality-tools 的標籤或 commit，要跟 `uses` 的 ref 相同 |
 | `tools-repository` | 否 | `<呼叫端的擁有者>/quality-tools` | quality-tools 不在同一個擁有者底下時填 |
 | `go-version-file` | 否 | `go.mod` | |
-| `dotnet-version` | 否 | `8.0.x` | |
+| `dotnet-version` | 否 | `10.0.x` | |
 | `node-version` | 否 | `22` | StrykerJS 10 需要 Node 22 以上 |
 | `python-version` | 否 | `3.12` | |
 | `install` | 否 | 空 | 安裝專案相依套件的指令，例如 `npm ci`、`pip install -r requirements-dev.txt` |
