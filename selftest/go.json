@@ -170,6 +170,50 @@
       ]
     },
     {
+      "name": "有一個沒有可以改壞地方的套件（只有 doc.go 和測試）：不帶 --base 的 mutation 和 baseline 都跑得完，不會停在 gremlins 執行失敗",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "mkdir docsonly && printf '%s' \"$DOC_GO\" > docsonly/doc.go && printf '%s' \"$DOC_TEST\" > docsonly/doc_test.go && git add -A && git commit -qm docsonly"
+          ],
+          "env": {
+            "DOC_GO": "// Package docsonly 只有說明和測試，沒有可以改壞的程式碼。\npackage docsonly\n",
+            "DOC_TEST": "package docsonly\n\nimport \"testing\"\n\nfunc TestNothing(t *testing.T) {}\n"
+          },
+          "exit": 0
+        },
+        {
+          "run": [
+            "mutation"
+          ],
+          "exit": 1,
+          "contains": [
+            "抓錯檢查：docsonly ...",
+            "FAIL：抓錯率低於門檻"
+          ],
+          "not_contains": [
+            "gremlins 執行失敗"
+          ]
+        },
+        {
+          "run": [
+            "baseline",
+            "--out",
+            "docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "已寫入 docs/q.md"
+          ],
+          "not_contains": [
+            "gremlins 執行失敗"
+          ]
+        }
+      ]
+    },
+    {
       "name": "測試失敗：test 回傳 1",
       "edits": [
         {

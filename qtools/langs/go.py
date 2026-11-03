@@ -193,8 +193,9 @@ class Go(Language):
                 if os.path.exists(out):
                     with open(out, encoding="utf-8") as f:
                         result = json.load(f)
-                elif skip and NO_RESULTS in r.stdout + r.stderr:
-                    # 改到的檔案沒有可以改壞的地方（例如只有常數），其他檔案又都略過了，gremlins 不寫結果檔
+                elif NO_RESULTS in r.stdout + r.stderr:
+                    # 套件裡沒有可以改壞的地方（只有測試、常數、型別或 doc.go），或是 --base 時改到的檔案沒有可以
+                    # 改壞的地方、其他檔案又都略過了。gremlins 只在成功執行且沒有改壞的版本時印這行，不寫結果檔
                     result = {}
                 else:
                     raise QualityError("gremlins 執行失敗（{}）：\n{}{}".format(d, r.stdout, r.stderr))
