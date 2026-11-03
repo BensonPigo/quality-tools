@@ -440,6 +440,42 @@ class SettingsChecks(unittest.TestCase):
         with_workers = go.gremlins_args(go.LANGUAGE().settings(self.cfg(workers=3)), "shipping", "out.json")
         self.assertEqual(with_workers[-2:], ["--workers", "3"])
 
+    def test_go_args_skip_files(self):
+        null = go.LANGUAGE().settings(self.cfg())
+        without = go.gremlins_args(null, "shipping", "out.json", ["sub.d"])
+        self.assertEqual(go.gremlins_args(null, "shipping", "out.json", ["sub.d"], []), without)
+        args = go.gremlins_args(null, "shipping", "out.json", ["sub.d"], ["ee.go", "rate_v2.go"])
+        self.assertEqual(args, without + ["-E", "^ee\\x{2E}go$", "-E", "^rate_v2\\x{2E}go$"])
+
+    def test_go_skip_pattern_escapes_by_code_point(self):
+        self.assertEqual(go.skip_pattern("fee.go"), "^fee\\x{2E}go$")
+        self.assertEqual(go.skip_pattern("a-b+c.go"), "^a\\x{2D}b\\x{2B}c\\x{2E}go$")
+        self.assertEqual(go.skip_pattern("運費.go"), "^\\x{904B}\\x{8CBB}\\x{2E}go$")
+
+    def test_go_unchanged_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                os.makedirs("shipping/sub")
+                for name in ("shipping/fee.go", "shipping/ee.go", "shipping/fee_test.go",
+                             "shipping/notes.txt", "shipping/sub/x.go", "main.go", "util.go"):
+                    open(name, "w").close()
+                self.assertEqual(go.unchanged_files("shipping", ["shipping/fee.go"]), ["ee.go"])
+                self.assertEqual(go.unchanged_files("shipping", ["shipping/fee.go", "shipping/ee.go"]), [])
+                self.assertEqual(go.unchanged_files(".", ["main.go"]), ["util.go"])
+            finally:
+                os.chdir(cwd)
+
+    def test_go_check_skipped(self):
+        result = {"files": [{"file_name": "fee.go"}, {"file_name": "ee.go"}]}
+        go.check_skipped(result, [])
+        go.check_skipped(result, ["rate.go"])
+        go.check_skipped({"files": None}, ["ee.go"])
+        with self.assertRaises(QualityError) as e:
+            go.check_skipped(result, ["ee.go"])
+        self.assertIn("ee.go", str(e.exception))
+
     def test_go_warns_about_timeout_only(self):
         lang = go.LANGUAGE()
         self.assertEqual(lang.unsupported_warnings(lang.settings(self.cfg())), [])

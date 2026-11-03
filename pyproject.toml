@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quality-tools"
-version = "2.0.1"
+version = "2.0.2"
 description = "三道檢查（單元測試、CRAP、抓錯檢查）的量測工具"
 requires-python = ">=3.8"
 

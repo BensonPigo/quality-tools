@@ -17,6 +17,7 @@ GOCYCLO = "github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0"
 GREMLINS = "github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"
 
 DEFAULTS = dict(BASE_DEFAULTS)  # 不排除任何改法；gremlins 沒有 timeout 設定，維持 --timeout-coefficient 30
+NO_RESULTS = "No results to report."  # gremlins v0.6.0 沒有任何改壞的版本時印這行，不寫結果檔
 TIMEOUT_COEFFICIENT = "30"  # 測試很快時，gremlins 估的時限太短，會誤判成 TIMED OUT
 
 # 下面兩張表抄自 gremlins v0.6.0 原始碼（Go module cache 的 github.com/go-gremlins/gremlins@v0.6.0）：
@@ -53,8 +54,11 @@ def gremlins_describe(mutator, line, column):
     return None, None
 
 
-def gremlins_args(settings, d, out, subdirs=()):
-    """gremlins unleash 的命令列參數。settings 是 Language.settings 的結果，沒設的項目不傳（維持 v1 行為）。"""
+def gremlins_args(settings, d, out, subdirs=(), skip_files=()):
+    """gremlins unleash 的命令列參數。settings 是 Language.settings 的結果，沒設的項目不傳（維持 v1 行為）。
+
+    skip_files 是套件目錄底下不產生改壞版本的檔名。
+    """
     args = ["unleash", "./" + d,
             "--timeout-coefficient", TIMEOUT_COEFFICIENT,
             "--invert-logical",  # 預設關閉的 && ↔ || 互換
@@ -63,7 +67,40 @@ def gremlins_args(settings, d, out, subdirs=()):
         args += ["--workers", str(settings["workers"])]
     for sub in subdirs:
         args += ["-E", "^" + sub.replace(".", "[.]") + "[^a-zA-Z0-9_.-]"]
+    for name in skip_files:
+        args += ["-E", skip_pattern(name)]
     return args
+
+
+def skip_pattern(name):
+    """比對整個檔名的 Go 正規表示式。ASCII 英數和 _ 以外的字元都寫成 \\x{碼位}，不用處理哪些字元要跳脫。
+
+    gremlins 比對的是相對於套件目錄、用 / 分隔的路徑，套件目錄底下的檔案就是檔名本身。
+    """
+    return "^" + "".join(
+        c if (c.isascii() and c.isalnum()) or c == "_" else "\\x{%X}" % ord(c) for c in name) + "$"
+
+
+def unchanged_files(d, files):
+    """套件目錄 d 底下（不含子目錄）、不是 _test.go 的 .go 檔中，不在 files 裡的檔名，排序後回傳。
+
+    files 是改到的檔案，相對 repo 根目錄、用 / 分隔。
+    """
+    changed = {normalize(f) for f in files}
+    names = []
+    for name in sorted(os.listdir(d)):
+        if not name.endswith(".go") or name.endswith("_test.go") or not os.path.isfile(os.path.join(d, name)):
+            continue
+        if (name if d == "." else d + "/" + name) not in changed:
+            names.append(name)
+    return names
+
+
+def check_skipped(result, skip_files):
+    """gremlins 的結果裡還有應該略過的檔案，代表 -E 沒有比對到，丟 QualityError，不讓速度問題默默變成看不見。"""
+    leaked = sorted({f["file_name"] for f in result.get("files") or []} & set(skip_files))
+    if leaked:
+        raise QualityError("排除沒改到的檔案沒有生效：" + "、".join(leaked))
 
 
 class Go(Language):
@@ -133,7 +170,8 @@ class Go(Language):
         return funcs
 
     def measure_mutants(self, cfg, dirs=None, files=None):
-        # files 用不到：gremlins 沒有可靠的方式只突變指定檔案，整個套件跑完後由核心過濾
+        # 有 files（--base）時，套件裡沒改到的檔案用 -E 排除，不產生改壞的版本；只算改到的行仍由核心過濾。
+        # 不用 gremlins 的 --diff：一段 diff 裡有兩處分開的修改時，它只算到第一處
         if dirs is None:
             dirs = [d for _, d in _packages(cfg, _module())]
 
@@ -145,13 +183,22 @@ class Go(Language):
             if not os.path.isdir(d):  # 整個目錄被刪掉
                 continue
             print("抓錯檢查：{} ...".format(d), file=sys.stderr, flush=True)
+            skip = unchanged_files(d, files) if files is not None else []
+            if skip:
+                print("只對改到的檔案產生改壞的版本，略過 {} 個沒改到的檔案".format(len(skip)),
+                      file=sys.stderr, flush=True)
             with tempfile.TemporaryDirectory() as tmp:
                 out = os.path.join(tmp, "gremlins.json")
-                r = run(["go", "run", GREMLINS] + gremlins_args(settings, d, out, _subdirs(d)))
-                if not os.path.exists(out):
+                r = run(["go", "run", GREMLINS] + gremlins_args(settings, d, out, _subdirs(d), skip))
+                if os.path.exists(out):
+                    with open(out, encoding="utf-8") as f:
+                        result = json.load(f)
+                elif skip and NO_RESULTS in r.stdout + r.stderr:
+                    # 改到的檔案沒有可以改壞的地方（例如只有常數），其他檔案又都略過了，gremlins 不寫結果檔
+                    result = {}
+                else:
                     raise QualityError("gremlins 執行失敗（{}）：\n{}{}".format(d, r.stdout, r.stderr))
-                with open(out, encoding="utf-8") as f:
-                    result = json.load(f)
+            check_skipped(result, skip)
             self.tools["gremlins"] = GREMLINS.rsplit("@", 1)[1]
 
             # 檔名是相對於套件目錄的路徑

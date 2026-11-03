@@ -87,6 +87,86 @@
         "沒抓到",
         "把 `>=` 改成 `>`",
         "FAIL："
+      ],
+      "not_contains": [
+        "略過"
+      ]
+    },
+    {
+      "name": "套件裡有沒改到的 ee.go：只對改到的 fee.go 產生改壞的版本，ee.go 被略過（ee.go 是 fee.go 的字尾，樣式沒錨定開頭就會連 fee.go 一起排除）",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 999 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0"
+        }
+      ],
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "printf '%s' \"$EE_GO\" > shipping/ee.go && printf '%s' \"$EE_TEST\" > shipping/ee_test.go && git add shipping/ee.go shipping/ee_test.go && git commit -qm add-ee"
+          ],
+          "env": {
+            "EE_GO": "package shipping\n\n// Extra 是 selftest 加的第二個程式檔，fee.go 改到、它沒改到時應該被略過。\nfunc Extra(n int) int {\n\tif n > 3 {\n\t\treturn n + 1\n\t}\n\treturn n\n}\n",
+            "EE_TEST": "package shipping\n\nimport \"testing\"\n\nfunc TestExtra(t *testing.T) {\n\tif Extra(5) != 6 || Extra(1) != 1 {\n\t\tt.Fatal(\"Extra\")\n\t}\n}\n"
+          },
+          "exit": 0
+        },
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main",
+            "--json",
+            "out-mut.json"
+          ],
+          "exit": 0,
+          "contains": [
+            "只對改到的檔案產生改壞的版本，略過 1 個沒改到的檔案"
+          ],
+          "not_contains": [
+            "沒有生效"
+          ],
+          "json": "out-mut.json",
+          "json_values": {
+            "mutation.mutants.0.file": "shipping/fee.go"
+          }
+        }
+      ]
+    },
+    {
+      "name": "只改到沒有可以改壞地方的 name.go，同套件其他檔案都略過：gremlins 沒有結果檔也算通過，跟 v2.0.1 一樣",
+      "steps": [
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "printf '%s' \"$NAME_GO\" > shipping/name.go && git add shipping/name.go && git commit -qm add-name && sed -i 's/\"shipping\"/\"delivery\"/' shipping/name.go"
+          ],
+          "env": {
+            "NAME_GO": "package shipping\n\n// Name 只有常數，沒有可以改壞的地方。\nconst Name = \"shipping\"\n"
+          },
+          "exit": 0
+        },
+        {
+          "run": [
+            "mutation",
+            "--base",
+            "main"
+          ],
+          "exit": 0,
+          "contains": [
+            "略過 1 個沒改到的檔案",
+            "PASS：改到的行沒有量到改壞的版本"
+          ]
+        }
       ]
     },
     {
