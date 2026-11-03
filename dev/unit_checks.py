@@ -124,6 +124,27 @@ class ConfigChecks(unittest.TestCase):
                 config.validate(raw)
 
 
+class GoCoverageScopeChecks(unittest.TestCase):
+    def test_default_is_package(self):
+        self.assertEqual(config.validate({"version": 2, "language": "go"})["go"]["coverage_scope"], "package")
+
+    def test_module_accepted(self):
+        cfg = config.validate({"version": 2, "language": "go", "go": {"coverage_scope": "module"}})
+        self.assertEqual(cfg["go"]["coverage_scope"], "module")
+
+    def test_bad_values_exit_2(self):
+        for value in ("modules", 1, None):
+            with self.assertRaises(QualityError) as cm:
+                config.validate({"version": 2, "language": "go", "go": {"coverage_scope": value}})
+            self.assertEqual(cm.exception.exit_code, 2)
+            self.assertIn("go.coverage_scope 必須是 package 或 module", str(cm.exception))
+
+    def test_unknown_go_key_rejected(self):
+        with self.assertRaises(QualityError) as cm:
+            config.validate({"version": 2, "language": "go", "go": {"unknown": 1}})
+        self.assertIn("go.unknown", str(cm.exception))
+
+
 class SchemaChecks(unittest.TestCase):
     def sample(self, command="baseline"):
         funcs = [Function("a.go", "Weight", 15, 18, 5, 0.0, crap=30.0), Function("a.go", "Fee", 4, 12, 3, 0.4, crap=4.9)]
@@ -816,6 +837,26 @@ class CompareChecks(unittest.TestCase):
         old = _baseline_report(pkgs=[("p", None, None)])
         new = _baseline_report(pkgs=[("p", 70.0, 70.0)])
         self.assertIn("套件 p：抓錯率 — → 70.00%；", "\n".join(baseline.compare_lines(old, new)))
+
+    def test_same_scope_has_no_scope_line(self):
+        old = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        new = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        new["tools"]["coverage_scope"] = "package"  # 舊報告沒記錄，Go 視為 package
+        self.assertNotIn("覆蓋率範圍不同", "\n".join(baseline.compare_lines(old, new)))
+
+    def test_scope_change_is_reported(self):
+        old = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        new = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        new["tools"]["coverage_scope"] = "module"
+        lines = baseline.compare_lines(old, new)
+        self.assertEqual(lines[1], "覆蓋率範圍不同（package → module），CRAP 的變化主要來自量法改變")
+        self.assertEqual(report_schema.validate(new), [])
+
+    def test_other_languages_have_no_scope(self):
+        old = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        new = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        old["language"] = new["language"] = "python"
+        self.assertNotIn("覆蓋率範圍不同", "\n".join(baseline.compare_lines(old, new)))
 
     def test_helper_reports_pass_schema(self):
         self.assertEqual(report_schema.validate(_baseline_report(pkgs=[("p", 50.0, 80.0)])), [])

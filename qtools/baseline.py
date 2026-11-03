@@ -83,6 +83,12 @@ def json_path(out_path):
     return os.path.splitext(out_path)[0] + ".json"
 
 
+SCOPE_TEXT = {
+    "package": "覆蓋率只算同一個套件的測試（go.coverage_scope = package）。",
+    "module": "覆蓋率算整個模組的測試，其他套件的測試執行到的程式碼也算（go.coverage_scope = module）。",
+}
+
+
 def write_baseline(funcs, mutants, cfg, lang, out_path, unused=(), churn=None, diff=None):
     """diff 是 compare_lines 的結果，有的話在最後加「## 跟上一次比較」。"""
     threshold = cfg["crap"]["threshold"]
@@ -100,6 +106,8 @@ def write_baseline(funcs, mutants, cfg, lang, out_path, unused=(), churn=None, d
     hot_count = sum(1 for f in funcs if is_hot(f, churn, cfg))
     out.append("門檻 {}。函式總數 {}，通過 {}，超標 {}（補測試就能過 {}，要拆函式 {}），優先處理 {}。\n".format(
         threshold, len(funcs), passed, len(funcs) - passed, len(funcs) - passed - split, split, hot_count))
+    if "coverage_scope" in lang.tools:
+        out.append(SCOPE_TEXT[lang.tools["coverage_scope"]] + "\n")
     out.append("修改次數是 {} 以來改到這個函式的 commit 數（建立的那一次不算），只算超標的函式。"
                "超標且修改次數 ≥ {} 的標「優先處理」，排在最前面。\n".format(cfg["baseline"]["churn_since"], hot_churn))
     out.append("| CRAP | C | 覆蓋率 | 修改次數 | 函式 | 位置 | 改善方向 | 優先處理 |")
@@ -188,9 +196,20 @@ def _count_summary(report):
     }
 
 
+def coverage_scope(report):
+    """Go 報告的覆蓋率範圍。v2.1.0 以前的 Go 報告沒有記錄，那時只有 package；其他語言回傳 None。"""
+    scope = report["tools"].get("coverage_scope")
+    if scope is None and report["language"] == "go":
+        return "package"
+    return scope
+
+
 def compare_lines(old, new):
     """兩份 baseline JSON 的前後差，每項一行「舊 → 新（差）」，比例差用百分點。"""
     lines = ["舊報告：commit {}；新報告：commit {}".format(old["commit"][:7], new["commit"][:7])]
+    old_scope, new_scope = coverage_scope(old), coverage_scope(new)
+    if old_scope != new_scope:
+        lines.append("覆蓋率範圍不同（{} → {}），CRAP 的變化主要來自量法改變".format(old_scope, new_scope))
     old_counts, new_counts = _count_summary(old), _count_summary(new)
     for name in old_counts:
         lines.append("{}：{}".format(name, _count_change(old_counts[name], new_counts[name])))

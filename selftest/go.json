@@ -45,6 +45,99 @@
       ]
     },
     {
+      "name": "go.coverage_scope = module：別的套件的測試跑到 Weight 也算覆蓋率，改 Weight 的 CRAP 通過",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "return 50",
+          "new": "return 55"
+        },
+        {
+          "file": "crossuse/doc.go",
+          "content": "// Package crossuse 只放從別的套件測 shipping 的測試。\npackage crossuse\n"
+        },
+        {
+          "file": "crossuse/weight_test.go",
+          "content": "package crossuse\n\nimport (\n\t\"testing\"\n\n\t\"shop/shipping\"\n)\n\n// 從別的套件測 shipping.Weight：只有 go.coverage_scope = module 時才算進 Weight 的覆蓋率。\nfunc TestWeightFromOtherPackage(t *testing.T) {\n\tif shipping.Weight(25) != 200 || shipping.Weight(15) != 100 || shipping.Weight(1) != 0 {\n\t\tt.Fatal(\"Weight\")\n\t}\n}\n"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"crap\": {",
+          "new": "\"go\": {\"coverage_scope\": \"module\"},\n  \"crap\": {"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main",
+        "--json",
+        "out-crap.json"
+      ],
+      "exit": 0,
+      "contains": [
+        "覆蓋率：整個模組的測試都算（go.coverage_scope = module）",
+        "PASS"
+      ],
+      "json": "out-crap.json",
+      "json_values": {
+        "tools.coverage_scope": "module"
+      }
+    },
+    {
+      "name": "同上但沒設 go.coverage_scope（預設 package）：別的套件的測試不算，改 Weight 的 CRAP 沒過",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "return 50",
+          "new": "return 55"
+        },
+        {
+          "file": "crossuse/doc.go",
+          "content": "// Package crossuse 只放從別的套件測 shipping 的測試。\npackage crossuse\n"
+        },
+        {
+          "file": "crossuse/weight_test.go",
+          "content": "package crossuse\n\nimport (\n\t\"testing\"\n\n\t\"shop/shipping\"\n)\n\n// 從別的套件測 shipping.Weight：只有 go.coverage_scope = module 時才算進 Weight 的覆蓋率。\nfunc TestWeightFromOtherPackage(t *testing.T) {\n\tif shipping.Weight(25) != 200 || shipping.Weight(15) != 100 || shipping.Weight(1) != 0 {\n\t\tt.Fatal(\"Weight\")\n\t}\n}\n"
+        }
+      ],
+      "run": [
+        "crap",
+        "--base",
+        "main",
+        "--json",
+        "out-crap.json"
+      ],
+      "exit": 1,
+      "contains": [
+        "覆蓋率要到 35%",
+        "FAIL：1 個函式"
+      ],
+      "not_contains": [
+        "整個模組的測試都算"
+      ],
+      "json": "out-crap.json",
+      "json_values": {
+        "tools.coverage_scope": "package"
+      }
+    },
+    {
+      "name": "go.coverage_scope 寫成 modules：結束碼 2",
+      "edits": [
+        {
+          "file": ".quality.json",
+          "old": "\"crap\": {",
+          "new": "\"go\": {\"coverage_scope\": \"modules\"},\n  \"crap\": {"
+        }
+      ],
+      "run": [
+        "crap"
+      ],
+      "exit": 2,
+      "contains": [
+        "go.coverage_scope 必須是 package 或 module"
+      ]
+    },
+    {
       "name": "只改函式外面的註解：不算改到函式",
       "edits": [
         {

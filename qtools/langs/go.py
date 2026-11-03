@@ -1,4 +1,4 @@
-"""Go 的量測轉換：覆蓋率用 go test -cover，圈複雜度用 gocyclo，抓錯檢查用 gremlins。"""
+"""Go 的量測轉換：覆蓋率用 go test -cover（go.coverage_scope 是 module 時加 -coverpkg），圈複雜度用 gocyclo，抓錯檢查用 gremlins。"""
 
 import json
 import os
@@ -125,9 +125,18 @@ class Go(Language):
         module = _module()
         pkgs = _packages(cfg, module)
 
+        scope = cfg["go"]["coverage_scope"]
+        self.tools["coverage_scope"] = scope
+        coverpkg = []
+        if scope == "module":
+            # 每個套件的覆蓋率也算其他套件的測試。用 import path 清單，不用 ./... 樣式：
+            # go list ./... 不會跳過 node_modules 這類目錄，樣式會把 exclude 底下的套件也算進去
+            coverpkg = ["-coverpkg=" + ",".join(p for p, _ in pkgs)]
+            print("覆蓋率：整個模組的測試都算（go.coverage_scope = module）", file=sys.stderr, flush=True)
+
         with tempfile.TemporaryDirectory() as tmp:
             profile = os.path.join(tmp, "cover.out")
-            r = run(["go", "test", "-coverprofile=" + profile] + [p for p, _ in pkgs])
+            r = run(["go", "test", "-coverprofile=" + profile] + coverpkg + [p for p, _ in pkgs])
             print(r.stdout, end="")
             if r.returncode != 0:
                 raise QualityError("測試沒有全部通過，請先修好第一關（單元測試）再量 CRAP：\n" + r.stderr)

@@ -2,6 +2,15 @@
 
 每一版寫三件事：改了什麼、原本通過的專案會不會變成沒過、專案 repo 要不要跟著改設定。版本號的規則見 README 的「改版流程」。
 
+## v2.1.0
+
+- 新增設定 `go.coverage_scope`：`"package"`（預設，跟之前一樣只算同一個套件的測試）或 `"module"`（整個模組的測試都算，`go test` 加上 `-coverpkg=<所有沒被 exclude 排除的套件>`）。只影響 Go 的 CRAP（`crap`、`check` 的第二關、`baseline`），抓錯檢查不變。測試集中在某個套件、跑整套流程的專案，用 `"module"` 才不會被要求補已經測到的程式。實測一個以整合測試為主的 Go 專案，超標的函式從 82 個變成 36 個。
+- 設成 `"module"` 時，畫面印「覆蓋率：整個模組的測試都算（go.coverage_scope = module）」。
+- Go 量過 CRAP 的 JSON 報告，`tools` 多一個 `coverage_scope`（`package` 或 `module`）。JSON 的 schema 版本不變，舊的現況報告照樣能拿來比較。
+- 現況報告的 CRAP 段（Go）多一行寫明覆蓋率範圍。`compare` 和 `baseline --compare` 比較兩份覆蓋率範圍不同的報告時，多一行「覆蓋率範圍不同（package → module），CRAP 的變化主要來自量法改變」；舊的 Go 報告沒有記錄範圍，視為 `package`。
+
+原本通過的專案不會變成沒過：沒設 `go.coverage_scope` 時量法和判定都跟 v2.0.3 相同，CRAP 指令的畫面輸出也相同。要用 `"module"` 的專案在 `.quality.json` 加 `"go": {"coverage_scope": "module"}`；這個設定要等工具升到 v2.1.0 之後才能加，舊版會因為不認得 `go` 而以結束碼 2 停下。用 reusable workflow 的專案，`uses:` 和 `tools-ref` 一起改成 `v2.1.0`。
+
 ## v2.0.3
 
 - Go 的套件裡沒有任何可以改壞的地方時（只有測試、常數、型別或 `doc.go`），gremlins 印「No results to report.」且不寫結果檔。之前只有加 `--base`、同套件其他檔案都略過時才算成沒有改壞的版本，`baseline` 和不帶 `--base` 的 `mutation` 遇到這種套件會以結束碼 2 停下（「gremlins 執行失敗」）；現在一律算成這個套件沒有改壞的版本。gremlins 執行失敗（例如測試失敗）時仍以結束碼 2 停下。
