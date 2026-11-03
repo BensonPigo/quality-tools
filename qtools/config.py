@@ -29,6 +29,7 @@ DEFAULTS = {
         "equivalents_file": ".quality-equivalents.json",
     },
     "baseline": {"out": "docs/品質現況.md", "churn_since": "6 months ago", "hot_churn": 5},
+    "go": {"coverage_scope": "package"},
     "csharp": {"solution": None},
     "js": {"test_runner": None},
     "python": {"interpreter": None},
@@ -104,6 +105,7 @@ def _check_values(cfg):
     need(isinstance(b["out"], str) and b["out"], "baseline.out 必須是檔名的字串")
     need(isinstance(b["churn_since"], str) and b["churn_since"], "baseline.churn_since 必須是字串，例如 \"6 months ago\"")
     need(isinstance(b["hot_churn"], int) and not isinstance(b["hot_churn"], bool), "baseline.hot_churn 必須是整數")
+    need(cfg["go"]["coverage_scope"] in ("package", "module"), "go.coverage_scope 必須是 package 或 module")
     need(cfg["csharp"]["solution"] is None or isinstance(cfg["csharp"]["solution"], str), "csharp.solution 必須是字串或 null")
     need(cfg["js"]["test_runner"] in (None, "vitest", "jest"), "js.test_runner 必須是 vitest、jest 或 null")
     need(cfg["python"]["interpreter"] is None or isinstance(cfg["python"]["interpreter"], str),
