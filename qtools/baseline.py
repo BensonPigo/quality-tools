@@ -87,6 +87,10 @@ SCOPE_TEXT = {
     "package": "覆蓋率只算同一個套件的測試（go.coverage_scope = package）。",
     "module": "覆蓋率算整個模組的測試，其他套件的測試執行到的程式碼也算（go.coverage_scope = module）。",
 }
+MUTATION_SCOPE_TEXT = {
+    "package": "每個改壞的版本只跑同一個套件的測試（go.coverage_scope = package）。",
+    "module": "每個改壞的版本跑整個模組的測試（go.coverage_scope = module，gremlins --integration --coverpkg）。",
+}
 
 
 def write_baseline(funcs, mutants, cfg, lang, out_path, unused=(), churn=None, diff=None):
@@ -124,6 +128,8 @@ def write_baseline(funcs, mutants, cfg, lang, out_path, unused=(), churn=None, d
     out.append("## 抓錯檢查\n")
     out.append("抓錯率 =（抓到 + 逾時）÷（抓到 + 逾時 + 沒抓到），看有測到的程式碼測得夠不夠嚴。")
     out.append("測到率 =（抓到 + 逾時 + 沒抓到）÷（再加上測試沒跑到），看有多少程式碼有測試。兩個數字要一起看。\n")
+    if "mutation_scope" in lang.tools:
+        out.append(MUTATION_SCOPE_TEXT[lang.tools["mutation_scope"]] + "\n")
     out.append("| 套件 | 抓到 | 逾時 | 沒抓到 | 測試沒跑到 | 抓錯率 | 測到率 |")
     out.append("|---|---|---|---|---|---|---|")
     by_pkg = mutation.by_package(mutants, lang.report_group)
@@ -196,12 +202,21 @@ def _count_summary(report):
     }
 
 
-def coverage_scope(report):
-    """Go 報告的覆蓋率範圍。v2.1.0 以前的 Go 報告沒有記錄，那時只有 package；其他語言回傳 None。"""
-    scope = report["tools"].get("coverage_scope")
+def _go_scope(report, key):
+    scope = report["tools"].get(key)
     if scope is None and report["language"] == "go":
         return "package"
     return scope
+
+
+def coverage_scope(report):
+    """Go 報告 CRAP 的覆蓋率範圍。v2.1.0 以前的 Go 報告沒有記錄，那時只有 package；其他語言回傳 None。"""
+    return _go_scope(report, "coverage_scope")
+
+
+def mutation_scope(report):
+    """Go 報告抓錯檢查的範圍。v2.2.0 以前的 Go 報告沒有記錄，那時一律分套件（package）；其他語言回傳 None。"""
+    return _go_scope(report, "mutation_scope")
 
 
 def compare_lines(old, new):
@@ -210,6 +225,9 @@ def compare_lines(old, new):
     old_scope, new_scope = coverage_scope(old), coverage_scope(new)
     if old_scope != new_scope:
         lines.append("覆蓋率範圍不同（{} → {}），CRAP 的變化主要來自量法改變".format(old_scope, new_scope))
+    old_scope, new_scope = mutation_scope(old), mutation_scope(new)
+    if old_scope != new_scope:
+        lines.append("抓錯檢查的範圍不同（{} → {}），抓錯率和測到率的變化主要來自量法改變".format(old_scope, new_scope))
     old_counts, new_counts = _count_summary(old), _count_summary(new)
     for name in old_counts:
         lines.append("{}：{}".format(name, _count_change(old_counts[name], new_counts[name])))

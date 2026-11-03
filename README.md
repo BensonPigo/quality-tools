@@ -169,13 +169,13 @@ quality-tools/
 | `mutation.kill_rate_threshold` | `80` | 抓錯率門檻（百分比） |
 | `mutation.reach_rate_threshold` | `50` | 測到率門檻（百分比） |
 | `mutation.timeout_seconds` | `null` | 每個改壞版本的逾時秒數，正數。`null` 用該語言的預設值，見下表 |
-| `mutation.workers` | `null` | 同時跑幾個，正整數。`null` 用該語言的預設值 |
+| `mutation.workers` | `null` | 同時跑幾個，正整數。`null` 用該語言的預設值。Go 設成 `go.coverage_scope = "module"` 時，gremlins 實際只用一半 |
 | `mutation.exclude_mutators` | `null` | 要排除的改法名稱，字串陣列。名稱是各工具報告裡的名稱，也就是 JSON 報告 `mutation.mutants[].mutator` 的值。`null` 用該語言的預設值（不排除任何改法） |
 | `mutation.equivalents_file` | `".quality-equivalents.json"` | 改了也沒差的版本排除清單的檔名，檔案不存在等於空清單 |
 | `baseline.out` | `"docs/品質現況.md"` | 現況報告的檔名，JSON 寫到同名的 `.json` |
 | `baseline.churn_since` | `"6 months ago"` | 修改次數從什麼時候算起，傳給 `git log --since` |
 | `baseline.hot_churn` | `5` | 超標的函式，修改次數達到這個數字就標「優先處理」 |
-| `go.coverage_scope` | `"package"` | Go 的 CRAP 覆蓋率算哪些測試。`"package"` 只算同一個套件的測試；`"module"` 整個模組的測試都算（`go test -coverpkg`），適合靠跨套件整合測試的專案。只影響 CRAP，抓錯檢查不變。見「各語言注意事項」的 Go |
+| `go.coverage_scope` | `"package"` | Go 的 CRAP 和抓錯檢查算哪些測試。`"package"` 只算同一個套件的測試；`"module"` 整個模組的測試都算（CRAP 用 `go test -coverpkg`，抓錯檢查用 gremlins 的 `--integration --coverpkg`），適合靠跨套件整合測試的專案，抓錯檢查會慢很多。見「各語言注意事項」的 Go |
 | `csharp.solution` | `null` | 根目錄有多個 `.sln` 或 `.slnx` 時，指定要測哪一個 |
 | `js.test_runner` | `null` | `"vitest"`、`"jest"` 或 `null`。`null` 依 `package.json` 自動判斷 |
 | `python.interpreter` | `null` | 執行測試用的 Python。`null` 用專案根目錄的 `.venv`，沒有的話用執行 `quality.py` 的那個 Python |
@@ -408,7 +408,10 @@ python dev/v1_parity.py record             # 重新用 v1.0.0 記錄（一般不
 - **函式結尾是用「單獨一行的 `}`」判斷。** 沒經過 gofmt 的程式碼可能判斷錯。Go 專案幾乎都用 gofmt，CI 可以另外加 `gofmt -l` 檢查。
 - **覆蓋率按「敘述」計算**，用的是 `go test -cover`。
 - **覆蓋率預設只算同一個套件的測試**（`go.coverage_scope` = `"package"`，跟 v1 一致）。其他三種語言都是跑全部測試再算覆蓋率，Go 是唯一分套件算的。測試集中在某個套件、透過 HTTP 或公開 API 跑整套流程的專案，被執行到的套件覆蓋率會被低估，CRAP 會要求補其實已經測到的程式；這種專案設成 `"module"`，`go test` 會加上 `-coverpkg=<所有沒被 exclude 排除的套件>`，畫面會印「覆蓋率：整個模組的測試都算」，現況報告的 CRAP 段也會寫明。兩種設定量出來的現況報告用 `compare` 比較時，會多一行「覆蓋率範圍不同」。
-- **`go.coverage_scope` 不影響抓錯檢查。** gremlins 仍是一次一個套件、只跑該套件的測試，被其他套件的測試執行到的程式碼，改壞的版本仍會算成「測試沒跑到」，測到率會偏低。
+- **`go.coverage_scope = "module"` 也套用到抓錯檢查**（`mutation`、`check` 的第三關、`baseline`）。gremlins 加上 `--integration` 和 `--coverpkg <跟 CRAP 同一份套件清單>`：覆蓋率用整個模組的測試量，每個改壞的版本也在模組根目錄跑 `go test ./...`。兩個參數要一起加，只加 `--integration` 時 gremlins 仍只記錄同套件測試跑到的行。畫面會印「抓錯檢查：整個模組的測試都算」，現況報告的抓錯檢查段也會寫明，JSON 的 `tools.mutation_scope` 記錄 `package` 或 `module`。
+- **`module` 的抓錯檢查比較慢。** 每個套件都要先跑一次整個模組的測試量覆蓋率，每個改壞的版本也跑整個模組的測試。gremlins 在這個模式下會把 worker 數減半（`mutation.workers` 設 4，實際 2 個）。實測一個整個模組測試約 34 秒的專案，一個 300 多個改壞版本的套件跑完要 1 小時（實際 2 個 worker）；`baseline` 對每個套件都這樣跑，要好幾個小時，適合夜間跑。
+- **`module` 時，`go test ./...` 會跑模組裡所有套件的測試**，包括 `exclude` 底下但仍屬於同一個模組的套件（有自己 `go.mod` 的子目錄不算）。這些測試沒過，抓錯檢查會以結束碼 2 停下。
+- 拿 v2.2.0 以前的現況報告跟 `module` 的新報告比較時，`compare` 會多一行「抓錯檢查的範圍不同」：那之前的抓錯檢查一律只跑同套件的測試。
 - **gremlins 每個 worker 開工前，會把 go.mod 所在的目錄（通常是 repo 根目錄）整個複製一份到系統暫存資料夾**，包括 `node_modules`、`.git` 這類目錄。這個目錄很大時，抓錯檢查的時間和硬碟用量主要花在這裡；`mutation.workers` 設小一點可以少複製幾份。
 - gremlins 在 Windows 上執行完，系統暫存資料夾會留下 `gremlins-*` 目錄，每個都是 repo 的複製品，累積起來可能有好幾 GB。不影響結果，要定期手動刪除。
 

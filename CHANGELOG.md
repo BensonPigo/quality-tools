@@ -2,6 +2,14 @@
 
 每一版寫三件事：改了什麼、原本通過的專案會不會變成沒過、專案 repo 要不要跟著改設定。版本號的規則見 README 的「改版流程」。
 
+## v2.2.0
+
+- `go.coverage_scope = "module"` 也套用到 Go 的抓錯檢查（`mutation`、`check` 的第三關、`baseline`）：gremlins 加上 `--integration --coverpkg <沒被 exclude 排除的套件>`，覆蓋率和每個改壞的版本都跑整個模組的測試。v2.1.0 時這個設定只影響 CRAP，同一行程式在 CRAP 算有測到、在抓錯檢查算「測試沒跑到」。實測一個以整合測試為主的套件，測到率從 13.4% 變成 94.6%，抓錯率 82.2% → 83.3%，原本被歸成「測試沒跑到」的 53 個沒抓到的改壞版本現在會列出來。
+- 設成 `"module"` 時，畫面印「抓錯檢查：整個模組的測試都算（go.coverage_scope = module），每個改壞的版本跑整個模組的測試」。
+- Go 量過抓錯檢查的 JSON 報告，`tools` 多一個 `mutation_scope`（`package` 或 `module`），schema 版本不變。現況報告的抓錯檢查段（Go）多一行寫明範圍。`compare` 和 `baseline --compare` 遇到兩份報告的抓錯範圍不同時，多一行「抓錯檢查的範圍不同（package → module），抓錯率和測到率的變化主要來自量法改變」；v2.2.0 以前的 Go 報告沒有記錄，視為 `package`。所以拿 v2.1.0 設成 `module` 的現況報告跟新的比較，也會出現這一行。
+
+沒設 `go.coverage_scope`（或設成 `"package"`）的專案，量法、判定和畫面輸出都跟 v2.1.0 相同，JSON 只多 `tools.mutation_scope`。設成 `"module"` 的專案：抓錯檢查會執行原本被歸成「測試沒跑到」的改壞版本，測到率上升，抓錯率可能下降，已經啟用第三關的可能由通過變成沒過；抓錯檢查和 `baseline` 都會慢很多（見 README 的 Go 注意事項）。`.quality.json` 不用改。用 reusable workflow 的專案，`uses:` 和 `tools-ref` 一起改成 `v2.2.0`。
+
 ## v2.1.0
 
 - 新增設定 `go.coverage_scope`：`"package"`（預設，跟之前一樣只算同一個套件的測試）或 `"module"`（整個模組的測試都算，`go test` 加上 `-coverpkg=<所有沒被 exclude 排除的套件>`）。只影響 Go 的 CRAP（`crap`、`check` 的第二關、`baseline`），抓錯檢查不變。測試集中在某個套件、跑整套流程的專案，用 `"module"` 才不會被要求補已經測到的程式。實測一個以整合測試為主的 Go 專案，超標的函式從 82 個變成 36 個。
