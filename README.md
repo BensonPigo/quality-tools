@@ -406,7 +406,7 @@ python dev/v1_parity.py record             # 重新用 v1.0.0 記錄（一般不
 - **加 `--base` 時，只對改到的檔案產生改壞的版本**，同套件沒改到的檔案用 gremlins 的 `-E` 排除，畫面會印「略過 N 個沒改到的檔案」。每個改壞的版本仍然要跑一次整個套件的測試，所以套件的測試越慢，抓錯檢查越慢。gremlins v0.6.0 的 `--diff` 在一段 diff 裡有兩處修改時會漏掉後一處，不能用。
 - **函式結尾是用「單獨一行的 `}`」判斷。** 沒經過 gofmt 的程式碼可能判斷錯。Go 專案幾乎都用 gofmt，CI 可以另外加 `gofmt -l` 檢查。
 - **覆蓋率按「敘述」計算**，用的是 `go test -cover`。
-- **gremlins 每個 worker 開工前，會把整個 repo 根目錄複製一份到系統暫存資料夾**，包括 `node_modules`、`.git` 這類目錄。repo 根目錄很大時，抓錯檢查的時間和硬碟用量主要花在這裡；`mutation.workers` 設小一點可以少複製幾份。
+- **gremlins 每個 worker 開工前，會把 go.mod 所在的目錄（通常是 repo 根目錄）整個複製一份到系統暫存資料夾**，包括 `node_modules`、`.git` 這類目錄。這個目錄很大時，抓錯檢查的時間和硬碟用量主要花在這裡；`mutation.workers` 設小一點可以少複製幾份。
 - gremlins 在 Windows 上執行完，系統暫存資料夾會留下 `gremlins-*` 目錄，每個都是 repo 的複製品，累積起來可能有好幾 GB。不影響結果，要定期手動刪除。
 
 ### C# / .NET
