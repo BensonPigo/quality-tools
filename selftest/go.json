@@ -385,7 +385,7 @@
           "shell": [
             "{bash}",
             "-c",
-            "printf '%s' \"$NAME_GO\" > shipping/name.go && git add shipping/name.go && git commit -qm add-name && sed -i 's/\"shipping\"/\"delivery\"/' shipping/name.go"
+            "printf '%s' \"$NAME_GO\" > shipping/name.go && git add shipping/name.go && git commit -qm add-name && sed 's/\"shipping\"/\"delivery\"/' shipping/name.go > shipping/name.go.tmp && mv shipping/name.go.tmp shipping/name.go"
           ],
           "env": {
             "NAME_GO": "package shipping\n\n// Name 只有常數，沒有可以改壞的地方。\nconst Name = \"shipping\"\n"
@@ -1186,7 +1186,7 @@
           "shell": [
             "{bash}",
             "-c",
-            "sed -i 's|// v1|// v2|' shipping/fee.go && git commit -qam weight-v2"
+            "sed 's|// v1|// v2|' shipping/fee.go > shipping/fee.go.tmp && mv shipping/fee.go.tmp shipping/fee.go && git commit -qam weight-v2"
           ],
           "exit": 0
         },

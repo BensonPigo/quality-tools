@@ -476,6 +476,36 @@ class SettingsChecks(unittest.TestCase):
         self.assertEqual(args, without[:7] + ["--integration", "--coverpkg", "shop,shop/shipping"] + without[7:])
         self.assertIn("^ee\\x{2E}go$", args)
 
+    def test_go_gremlins_env_disables_test_cache(self):
+        # gremlins 用第一次 go test 的時間 × --timeout-coefficient 當每個改壞版本的時限。
+        # 那次 go test 讀到測試快取時只要零點幾秒，時限跟著變得太短，改壞的版本重新編譯就被算成逾時
+        # goflags 是 go env GOFLAGS 的結果（環境變數和 go env -w 寫的設定檔合併後實際生效的值），原樣保留再接 -count=1
+        env = go.gremlins_env({"PATH": "/bin"}, "")
+        self.assertEqual(env["GOFLAGS"], "-count=1")
+        self.assertEqual(env["PATH"], "/bin")
+        self.assertEqual(go.gremlins_env({}, "-mod=vendor")["GOFLAGS"], "-mod=vendor -count=1")
+        # 引號裡的空白不拆開重組
+        self.assertEqual(go.gremlins_env({}, "'-ldflags=-s  -w'")["GOFLAGS"], "'-ldflags=-s  -w' -count=1")
+
+    def test_go_measure_mutants_runs_gremlins_without_test_cache(self):
+        calls = []
+
+        def fake_run(cmd, cwd=None, env=None):
+            calls.append((cmd, env))
+            if cmd == ["go", "env", "GOFLAGS"]:  # 使用者用 go env -w 寫進設定檔的值，環境變數裡沒有
+                return subprocess.CompletedProcess(cmd, 0, "-tags=integ\n", "")
+            return subprocess.CompletedProcess(cmd, 0, go.NO_RESULTS, "")
+
+        cfg = config.validate({"version": 2, "language": "go"})
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(go, "run", fake_run), \
+                mock.patch.object(go, "_packages", lambda cfg, module: [("shop", tmp)]), \
+                mock.patch.object(go, "_module", lambda: "shop"), \
+                contextlib.redirect_stderr(io.StringIO()):
+            go.LANGUAGE().measure_mutants(cfg)
+        gremlins = [env for cmd, env in calls if go.GREMLINS in cmd]
+        self.assertEqual(len(gremlins), 1)
+        self.assertEqual(gremlins[0]["GOFLAGS"], "-tags=integ -count=1")
+
     def test_go_skip_pattern_escapes_by_code_point(self):
         self.assertEqual(go.skip_pattern("fee.go"), "^fee\\x{2E}go$")
         self.assertEqual(go.skip_pattern("a-b+c.go"), "^a\\x{2D}b\\x{2B}c\\x{2E}go$")
@@ -761,6 +791,22 @@ def _func(name, c, cov, start=1):
     f = Function("a.go", name, start, start + 5, c, cov)
     f.crap = crap.crap_score(c, cov)
     return f
+
+
+class SelftestScenarioChecks(unittest.TestCase):
+    def test_shell_steps_avoid_gnu_only_sed_in_place(self):
+        # GNU sed 的 -i 可以不帶備份副檔名，macOS 的 BSD sed 會把下一個參數當成副檔名，情境在 macOS 上就失敗。
+        # 改成 sed '...' 檔案 > 暫存檔 && mv 暫存檔 檔案
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "selftest")
+        found = []
+        for name in sorted(os.listdir(root)):
+            if not name.endswith(".json"):
+                continue
+            with open(os.path.join(root, name), encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    if "sed -i" in line:
+                        found.append("{}:{}".format(name, n))
+        self.assertEqual(found, [])
 
 
 class HotChecks(unittest.TestCase):
