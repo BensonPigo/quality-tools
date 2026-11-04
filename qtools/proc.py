@@ -22,6 +22,10 @@ def run(cmd, cwd=None, env=None):
         )
     except FileNotFoundError:
         raise QualityError("找不到指令 {}，請確認已安裝並加入 PATH".format(cmd[0]))
+    except OSError as e:
+        # 例如工具快取目錄裡的執行檔損毀或沒有執行權限：刪掉該目錄，下次會重新安裝
+        raise QualityError("無法執行 {}：{}。如果它在工具快取目錄（{}）底下，刪掉它所在的目錄，下次執行會重新安裝".format(
+            cmd[0], e, tools_dir()))
 
 
 def git(*args):

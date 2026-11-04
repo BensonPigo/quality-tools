@@ -21,7 +21,7 @@
 
 | 語言 | 覆蓋率和圈複雜度 | 抓錯檢查 | 工具版本誰管 |
 |---|---|---|---|
-| Go | `go test -cover` + gocyclo v0.6.0 | gremlins v0.6.0 | 本工具，用 `go run ...@版本` 執行 |
+| Go | `go test -cover` + gocyclo v0.6.0 | gremlins v0.6.0 | 本工具，第一次用 `go install ...@版本` 裝到工具快取目錄，之後直接執行 |
 | C# / .NET | coverlet + 自製的 CsMetrics（Roslyn） | Stryker.NET 5.0.0 | 本工具，第一次執行時裝到快取目錄 |
 | JavaScript / TypeScript | Vitest 或 Jest + 自製的 `complexity.cjs`（TypeScript 解析器 5.9.3） | StrykerJS | 解析器由本工具裝到快取目錄；StrykerJS 由各 repo 的 `package.json` 安裝 |
 | Python | coverage.py + Python 內建的 `ast` | cosmic-ray | 各 repo 的 Python 環境安裝 |
@@ -413,6 +413,7 @@ python dev/v1_parity.py record             # 重新用 v1.0.0 記錄（一般不
 - **gremlins 執行時，GOFLAGS 一律在 `go env GOFLAGS` 的值後面加 `-count=1`，不讀測試快取。** gremlins 先跑一次 `go test` 量覆蓋率，用花的時間 × 30 當每個改壞版本的時限，時限包含重新編譯。那次 `go test` 讀到快取（CRAP 或前一個套件剛跑過）時只花零點幾秒，時限只剩幾秒，改壞的版本重新編譯就超時，連測試全過的也被算成逾時（算抓到），抓錯率虛高；被越多套件引用的套件、`module` 模式、worker 越多越明顯。代價：每個改壞的版本都重跑沒受影響套件的測試，真的卡住的改壞版本要等到「30 × 實際測試時間」才判定逾時。使用者在 GOFLAGS 寫的 `-count` 會被蓋成 1。
 - **`module` 時，`go test ./...` 會跑模組裡所有套件的測試**，包括 `exclude` 底下但仍屬於同一個模組的套件（有自己 `go.mod` 的子目錄不算）。這些測試沒過，抓錯檢查會以結束碼 2 停下。
 - 拿 v2.2.0 以前的現況報告跟 `module` 的新報告比較時，`compare` 會多一行「抓錯檢查的範圍不同」：那之前的抓錯檢查一律只跑同套件的測試。
+- **gocyclo 和 gremlins 第一次使用時用 `go install` 裝到工具快取目錄**（`QUALITY_TOOLS_DIR`，預設 `~/.cache/quality-tools`），目錄名稱是 `<工具>-<工具版本>-<Go 版本>`，之後直接執行，不再經過 `go run`。`go run 套件@版本` 每次都向 GOPROXY 查版本資訊，網路一斷就失敗。第一次安裝和第一次下載專案的依賴仍然需要網路；這台機器跑過一次之後，斷網也能量測（gremlins 每個套件會先執行 `go mod download`，依賴都在模組快取裡時不連網）。Go 版本不同（例如專案 go.mod 的 toolchain 不同）會各自安裝一份。執行檔損毀時，畫面會印「無法執行 …」，刪掉該目錄，下次會重新安裝。
 - **gremlins 每個 worker 開工前，會把 go.mod 所在的目錄（通常是 repo 根目錄）整個複製一份到系統暫存資料夾**，包括 `node_modules`、`.git` 這類目錄。這個目錄很大時，抓錯檢查的時間和硬碟用量主要花在這裡；`mutation.workers` 設小一點可以少複製幾份。
 - gremlins 在 Windows 上執行完，系統暫存資料夾會留下 `gremlins-*` 目錄，每個都是 repo 的複製品，累積起來可能有好幾 GB。不影響結果，要定期手動刪除。
 
