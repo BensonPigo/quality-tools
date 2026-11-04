@@ -4,7 +4,7 @@
 
 ## v2.2.0
 
-- `go.coverage_scope = "module"` 也套用到 Go 的抓錯檢查（`mutation`、`check` 的第三關、`baseline`）：gremlins 加上 `--integration --coverpkg <沒被 exclude 排除的套件>`，覆蓋率和每個改壞的版本都跑整個模組的測試。v2.1.0 時這個設定只影響 CRAP，同一行程式在 CRAP 算有測到、在抓錯檢查算「測試沒跑到」。實測一個以整合測試為主的套件，測到率從 13.4% 變成 94.6%，抓錯率 82.2% → 83.3%，原本被歸成「測試沒跑到」的 53 個沒抓到的改壞版本現在會列出來。
+- `go.coverage_scope = "module"` 也套用到 Go 的抓錯檢查（`mutation`、`check` 的第三關、`baseline`）：gremlins 加上 `--integration --coverpkg <沒被 exclude 排除的套件>`，覆蓋率和每個改壞的版本都跑整個模組的測試。v2.1.0 時這個設定只影響 CRAP，同一行程式在 CRAP 算有測到、在抓錯檢查算「測試沒跑到」。實測一個以整合測試為主的套件，測到率從 13.4% 變成 94.6%，抓錯率 82.2% → 83.3%，沒抓到的改壞版本從 8 個變成 53 個，新增的 45 個原本被歸成「測試沒跑到」。
 - 設成 `"module"` 時，畫面印「抓錯檢查：整個模組的測試都算（go.coverage_scope = module），每個改壞的版本跑整個模組的測試」。
 - Go 量過抓錯檢查的 JSON 報告，`tools` 多一個 `mutation_scope`（`package` 或 `module`），schema 版本不變。現況報告的抓錯檢查段（Go）多一行寫明範圍。`compare` 和 `baseline --compare` 遇到兩份報告的抓錯範圍不同時，多一行「抓錯檢查的範圍不同（package → module），抓錯率和測到率的變化主要來自量法改變」；v2.2.0 以前的 Go 報告沒有記錄，視為 `package`。所以拿 v2.1.0 設成 `module` 的現況報告跟新的比較，也會出現這一行。
 
