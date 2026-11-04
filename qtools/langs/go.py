@@ -3,6 +3,7 @@
 import json
 import os
 import posixpath
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,7 +12,7 @@ from qtools.langs.base import DEFAULTS as BASE_DEFAULTS
 from qtools.langs.base import Language
 from qtools.model import Function, Mutant
 from qtools.mutation import source_lines
-from qtools.proc import QualityError, is_excluded, normalize, run
+from qtools.proc import QualityError, is_excluded, normalize, run, tools_dir
 
 GOCYCLO = "github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0"
 GREMLINS = "github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"
@@ -175,7 +176,7 @@ class Go(Language):
             coverage[(file, int(lineno))] = float(fields[2].rstrip("%")) / 100
 
         # 每行格式：14 shop Checkout checkout.go:31:1
-        r = run(["go", "run", GOCYCLO, "."])
+        r = run(_go_tool(GOCYCLO) + ["."])
         if r.returncode != 0:
             raise QualityError("gocyclo 執行失敗：\n" + r.stderr)
         self.tools["gocyclo"] = GOCYCLO.rsplit("@", 1)[1]
@@ -221,6 +222,7 @@ class Go(Language):
         if r.returncode != 0:
             raise QualityError("go env GOFLAGS 執行失敗：\n" + r.stderr)
         goflags = r.stdout
+        gremlins = _go_tool(GREMLINS)
         mutants = []
         for d in dirs:
             if not os.path.isdir(d):  # 整個目錄被刪掉
@@ -232,7 +234,7 @@ class Go(Language):
                       file=sys.stderr, flush=True)
             with tempfile.TemporaryDirectory() as tmp:
                 out = os.path.join(tmp, "gremlins.json")
-                r = run(["go", "run", GREMLINS] + gremlins_args(settings, d, out, _subdirs(d), skip, coverpkg),
+                r = run(gremlins + gremlins_args(settings, d, out, _subdirs(d), skip, coverpkg),
                         env=gremlins_env(os.environ, goflags))
                 if os.path.exists(out):
                     with open(out, encoding="utf-8") as f:
@@ -266,6 +268,40 @@ class Go(Language):
 
 
 LANGUAGE = Go
+
+
+def _go_tool(spec):
+    """回傳執行 Go 工具（spec 是 套件路徑@版本）的指令。第一次使用時 go install 到工具快取目錄，之後直接執行。
+
+    不用 go run 套件@版本：它每次都向 GOPROXY 查版本資訊和棄用狀態，模組快取裡已經有也一樣，
+    GOPROXY=off 時也失敗。baseline 對每個套件各跑一次 gremlins，任何一次網路不通整份量測就停下。
+
+    目錄名稱帶工具版本和 Go 版本：工具用建置它的 Go 的 go/parser 解析原始碼，Go 升級後要重裝，新語法才解析得了。
+    先裝到暫存目錄再整個搬過去：Windows 上 go install 直接覆寫目標檔，中途中斷會留下寫一半的執行檔，之後每次都失敗。
+    GOBIN 必須是絕對路徑，QUALITY_TOOLS_DIR 寫相對路徑時先轉成絕對路徑。
+    """
+    pkg, version = spec.rsplit("@", 1)
+    name = pkg.rsplit("/", 1)[1]
+    r = run(["go", "env", "GOVERSION"])
+    if r.returncode != 0:
+        raise QualityError("go env GOVERSION 執行失敗：\n" + r.stderr)
+    root = os.path.abspath(tools_dir())
+    path = os.path.join(root, "{}-{}-{}".format(name, version, r.stdout.strip()))
+    filename = name + (".exe" if os.name == "nt" else "")
+    exe = os.path.join(path, filename)
+    if not os.path.exists(exe):
+        print("安裝 {} {}（只有第一次）...".format(name, version), file=sys.stderr, flush=True)
+        os.makedirs(root, exist_ok=True)
+        tmp = tempfile.mkdtemp(prefix=".{}-".format(name), dir=root)
+        try:
+            r = run(["go", "install", spec], env=dict(os.environ, GOBIN=tmp))
+            if r.returncode != 0:
+                raise QualityError("{} 安裝失敗：\n{}{}".format(name, r.stdout, r.stderr))
+            os.makedirs(path, exist_ok=True)
+            os.replace(os.path.join(tmp, filename), exe)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return [exe]
 
 
 def _module():

@@ -24,6 +24,22 @@ from qtools.model import Function, Mutant  # noqa: E402
 from qtools.proc import QualityError  # noqa: E402
 
 
+class ProcChecks(unittest.TestCase):
+    def test_run_reports_unexecutable_file_as_quality_error(self):
+        # 快取的工具執行檔損毀（空檔、沒有執行權限）時，不丟 Python traceback，訊息帶出檔案路徑
+        if os.name == "nt":
+            self.skipTest("Windows 沒有執行權限位元")
+        from qtools import proc
+        with tempfile.TemporaryDirectory() as tmp:
+            for mode in (0o755, 0o644):
+                exe = os.path.join(tmp, "gremlins")
+                open(exe, "w").close()
+                os.chmod(exe, mode)
+                with self.assertRaises(QualityError) as e:
+                    proc.run([exe, "--help"])
+                self.assertIn(exe, str(e.exception))
+
+
 class VersionChecks(unittest.TestCase):
     def test_in_list_passes(self):
         base.check_version("cosmic-ray", "8.7.0", ["8.7.0"])
@@ -500,11 +516,77 @@ class SettingsChecks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(go, "run", fake_run), \
                 mock.patch.object(go, "_packages", lambda cfg, module: [("shop", tmp)]), \
                 mock.patch.object(go, "_module", lambda: "shop"), \
+                mock.patch.object(go, "_go_tool", lambda spec: ["/tools/" + spec]), \
                 contextlib.redirect_stderr(io.StringIO()):
             go.LANGUAGE().measure_mutants(cfg)
-        gremlins = [env for cmd, env in calls if go.GREMLINS in cmd]
+        gremlins = [env for cmd, env in calls if cmd[0] == "/tools/" + go.GREMLINS]
         self.assertEqual(len(gremlins), 1)
         self.assertEqual(gremlins[0]["GOFLAGS"], "-tags=integ -count=1")
+
+    def test_go_tool_installs_once_into_tools_dir(self):
+        calls = []
+        name = "gremlins" + (".exe" if os.name == "nt" else "")
+
+        def fake_run(cmd, cwd=None, env=None):
+            calls.append((cmd, env))
+            if cmd == ["go", "env", "GOVERSION"]:
+                return subprocess.CompletedProcess(cmd, 0, "go1.25.5\n", "")
+            # 安裝時最終目錄還不能出現：先裝到暫存目錄，整個檔案寫完才搬過去，中斷時不會留下寫一半的執行檔
+            self.assertFalse(os.path.exists(os.path.join(tmp, "gremlins-v0.6.0-go1.25.5")))
+            os.makedirs(env["GOBIN"], exist_ok=True)
+            open(os.path.join(env["GOBIN"], name), "w").close()
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(go, "run", fake_run), \
+                contextlib.redirect_stderr(io.StringIO()):
+            # QUALITY_TOOLS_DIR 寫相對路徑也可以：go install 要求 GOBIN 是絕對路徑
+            with mock.patch.dict(os.environ, {"QUALITY_TOOLS_DIR": os.path.relpath(tmp)}):
+                first = go._go_tool(go.GREMLINS)
+                second = go._go_tool(go.GREMLINS)
+            tmp = os.path.realpath(tmp)
+            exe = os.path.join(tmp, "gremlins-v0.6.0-go1.25.5", name)
+            self.assertEqual([os.path.realpath(first[0])], [exe])
+            self.assertEqual(second, first)
+            self.assertTrue(os.path.isabs(first[0]))
+            installs = [(cmd, env) for cmd, env in calls if cmd[:2] == ["go", "install"]]
+            self.assertEqual(len(installs), 1)  # 第二次直接用裝好的執行檔，不再安裝
+            self.assertEqual(installs[0][0], ["go", "install", go.GREMLINS])
+            self.assertTrue(os.path.isabs(installs[0][1]["GOBIN"]))
+            self.assertEqual(sorted(os.listdir(tmp)), ["gremlins-v0.6.0-go1.25.5"])  # 暫存目錄已清掉
+
+    def test_go_tool_reinstalls_after_go_upgrade(self):
+        # 執行檔綁著建置它的 Go 版本（go/parser），Go 升級後要重裝，不然新語法可能解析失敗
+        versions = iter(["go1.25.5\n", "go1.26.0\n"])
+        installs = []
+
+        def fake_run(cmd, cwd=None, env=None):
+            if cmd == ["go", "env", "GOVERSION"]:
+                return subprocess.CompletedProcess(cmd, 0, next(versions), "")
+            installs.append(env["GOBIN"])
+            os.makedirs(env["GOBIN"], exist_ok=True)
+            open(os.path.join(env["GOBIN"], "gocyclo" + (".exe" if os.name == "nt" else "")), "w").close()
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"QUALITY_TOOLS_DIR": tmp}), \
+                mock.patch.object(go, "run", fake_run), contextlib.redirect_stderr(io.StringIO()):
+            old = go._go_tool(go.GOCYCLO)
+            new = go._go_tool(go.GOCYCLO)
+        self.assertEqual(len(installs), 2)
+        self.assertNotEqual(old, new)
+        self.assertIn("gocyclo-v0.6.0-go1.26.0", new[0])
+
+    def test_go_tool_install_failure_is_quality_error(self):
+        def fail(cmd, cwd=None, env=None):
+            if cmd == ["go", "env", "GOVERSION"]:
+                return subprocess.CompletedProcess(cmd, 0, "go1.25.5\n", "")
+            return subprocess.CompletedProcess(cmd, 1, "", "dial tcp: no such host")
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"QUALITY_TOOLS_DIR": tmp}), \
+                mock.patch.object(go, "run", fail), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(QualityError) as e:
+                go._go_tool(go.GOCYCLO)
+            self.assertEqual(os.listdir(tmp), [])  # 失敗時不留暫存目錄，下次重新安裝
+        self.assertIn("no such host", str(e.exception))
 
     def test_go_skip_pattern_escapes_by_code_point(self):
         self.assertEqual(go.skip_pattern("fee.go"), "^fee\\x{2E}go$")
