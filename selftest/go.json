@@ -609,6 +609,153 @@
       ]
     },
     {
+      "name": "排除清單指定 column：同一行兩個邊界改法，只排除第 28 欄沒抓到的那個，第 11 欄的仍算抓到",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 1000 || total < 0 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 70"
+        },
+        {
+          "file": ".quality-equivalents.json",
+          "content": "[\n  {\n    \"file\": \"shipping/fee.go\",\n    \"function\": \"Fee\",\n    \"line_text\": \"if total >= 1000 || total < 0 {\",\n    \"mutator\": \"CONDITIONALS_BOUNDARY\",\n    \"reason\": \"total 不會是負數，< 0 和 <= 0 的差別只在 0，0 元時兩者都收運費\",\n    \"approved_by\": \"selftest\",\n    \"column\": 28\n  }\n]\n"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main",
+        "--json",
+        "out-mut.json"
+      ],
+      "exit": 0,
+      "contains": [
+        "已排除：改了也沒差 1",
+        "沒抓到  shipping/fee.go:5:28  把 `<` 改成 `>=`",
+        "抓到 3、",
+        "PASS"
+      ],
+      "not_contains": [
+        "把 `<` 改成 `<=`",
+        "排除清單有"
+      ],
+      "json": "out-mut.json",
+      "json_values": {
+        "mutation.counts.EQUIVALENT": 1,
+        "mutation.counts.KILLED": 3,
+        "mutation.counts.LIVED": 1
+      }
+    },
+    {
+      "name": "同上但不寫 column：同一行同一種改法全部排除，連抓到的第 11 欄也排除（v2.3.1 的行為），抓錯率剩 66.67%，低於門檻 70",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 1000 || total < 0 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 70"
+        },
+        {
+          "file": ".quality-equivalents.json",
+          "content": "[\n  {\n    \"file\": \"shipping/fee.go\",\n    \"function\": \"Fee\",\n    \"line_text\": \"if total >= 1000 || total < 0 {\",\n    \"mutator\": \"CONDITIONALS_BOUNDARY\",\n    \"reason\": \"total 不會是負數，< 0 和 <= 0 的差別只在 0，0 元時兩者都收運費\",\n    \"approved_by\": \"selftest\"\n  }\n]\n"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main",
+        "--json",
+        "out-mut.json"
+      ],
+      "exit": 1,
+      "contains": [
+        "已排除：改了也沒差 2",
+        "抓到 2、",
+        "抓錯率：66.67%"
+      ],
+      "json": "out-mut.json",
+      "json_values": {
+        "mutation.counts.EQUIVALENT": 2,
+        "mutation.counts.KILLED": 2,
+        "mutation.counts.LIVED": 1
+      }
+    },
+    {
+      "name": "排除清單的 column 寫錯：對不上，那個改壞版本算沒抓到，沒用到的項目印出欄位",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 1000 || total < 0 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 70"
+        },
+        {
+          "file": ".quality-equivalents.json",
+          "content": "[\n  {\n    \"file\": \"shipping/fee.go\",\n    \"function\": \"Fee\",\n    \"line_text\": \"if total >= 1000 || total < 0 {\",\n    \"mutator\": \"CONDITIONALS_BOUNDARY\",\n    \"reason\": \"total 不會是負數，< 0 和 <= 0 的差別只在 0，0 元時兩者都收運費\",\n    \"approved_by\": \"selftest\",\n    \"column\": 27\n  }\n]\n"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main",
+        "--json",
+        "out-mut.json"
+      ],
+      "exit": 1,
+      "contains": [
+        "沒抓到  shipping/fee.go:5:28  把 `<` 改成 `<=`",
+        "排除清單有 1 項沒用到",
+        "if total >= 1000 || total < 0 {  欄 27"
+      ],
+      "json": "out-mut.json",
+      "json_values": {
+        "mutation.counts.EQUIVALENT": 0,
+        "mutation.counts.LIVED": 2,
+        "mutation.unused_equivalents.0.column": 27
+      }
+    },
+    {
+      "name": "排除清單的 column 不是正整數：結束碼 2，指出第幾項",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if total >= 1000 {",
+          "new": "if total >= 1000 || total < 0 {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 70"
+        },
+        {
+          "file": ".quality-equivalents.json",
+          "content": "[\n  {\n    \"file\": \"shipping/fee.go\",\n    \"function\": \"Fee\",\n    \"line_text\": \"if total >= 1000 || total < 0 {\",\n    \"mutator\": \"CONDITIONALS_BOUNDARY\",\n    \"reason\": \"total 不會是負數，< 0 和 <= 0 的差別只在 0，0 元時兩者都收運費\",\n    \"approved_by\": \"selftest\",\n    \"column\": 0\n  }\n]\n"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main"
+      ],
+      "exit": 2,
+      "contains": [
+        "第 1 項的 column 必須是正整數"
+      ]
+    },
+    {
       "name": "排除清單有一項缺 reason：結束碼 2，指出第幾項",
       "edits": [
         {
