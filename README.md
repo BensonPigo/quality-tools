@@ -188,7 +188,7 @@ quality-tools/
 
 | 語言 | `timeout_seconds` | `workers` | `exclude_mutators` |
 |---|---|---|---|
-| Go（gremlins） | 不支援，設了會在 stderr 印警告。固定用 `--timeout-coefficient 30` | 傳給 `--workers`；`null` 用 gremlins 的預設 | 預設不排除；只在核心過濾 |
+| Go（gremlins） | 不支援，設了會在 stderr 印警告。固定用 `--timeout-coefficient 30`，GOFLAGS 加 `-count=1`（見「各語言注意事項」的 Go） | 傳給 `--workers`；`null` 用 gremlins 的預設 | 預設不排除；只在核心過濾 |
 | C#（Stryker.NET） | 秒數 × 1000 寫成 `additional-timeout`（毫秒，加在依正常測試時間算出的時限之外），放在暫存的設定檔，用 `--config-file` 傳入，用完即刪 | 傳給 `--concurrency` | 預設不排除；只在核心過濾 |
 | JS / TS（StrykerJS） | 秒數 × 1000 傳給 `timeoutMS`，意義同上 | 傳給 `concurrency` | 預設不排除；傳給 `mutator.excludedMutations`，StrykerJS 就不會產生這些改壞版本，省時間；核心也會標記 |
 | Python（cosmic-ray） | 預設 30 秒，每個改壞版本的總時限（同 v1） | 不支援，設了會在 stderr 印警告 | 預設不排除；只在核心過濾 |
@@ -410,6 +410,7 @@ python dev/v1_parity.py record             # 重新用 v1.0.0 記錄（一般不
 - **覆蓋率預設只算同一個套件的測試**（`go.coverage_scope` = `"package"`，跟 v1 一致）。其他三種語言都是跑全部測試再算覆蓋率，Go 是唯一分套件算的。測試集中在某個套件、透過 HTTP 或公開 API 跑整套流程的專案，被執行到的套件覆蓋率會被低估，CRAP 會要求補其實已經測到的程式；這種專案設成 `"module"`，`go test` 會加上 `-coverpkg=<所有沒被 exclude 排除的套件>`，畫面會印「覆蓋率：整個模組的測試都算」，現況報告的 CRAP 段也會寫明。兩種設定量出來的現況報告用 `compare` 比較時，會多一行「覆蓋率範圍不同」。
 - **`go.coverage_scope = "module"` 也套用到抓錯檢查**（`mutation`、`check` 的第三關、`baseline`）。gremlins 加上 `--integration` 和 `--coverpkg <跟 CRAP 同一份套件清單>`：覆蓋率用整個模組的測試量，每個改壞的版本也在模組根目錄跑 `go test ./...`。兩個參數要一起加，只加 `--integration` 時 gremlins 仍只記錄同套件測試跑到的行。畫面會印「抓錯檢查：整個模組的測試都算」，現況報告的抓錯檢查段也會寫明，JSON 的 `tools.mutation_scope` 記錄 `package` 或 `module`。
 - **`module` 的抓錯檢查比較慢。** 每個套件都要先跑一次整個模組的測試量覆蓋率，每個改壞的版本也跑整個模組的測試。gremlins 在這個模式下會把 worker 數減半（`mutation.workers` 設 4，實際 2 個）。實測一個整個模組測試約 34 秒的專案，一個 300 多個改壞版本的套件跑完要 1 小時（實際 2 個 worker）；`baseline` 對每個套件都這樣跑，要好幾個小時，適合夜間跑。
+- **gremlins 執行時，GOFLAGS 一律在 `go env GOFLAGS` 的值後面加 `-count=1`，不讀測試快取。** gremlins 先跑一次 `go test` 量覆蓋率，用花的時間 × 30 當每個改壞版本的時限，時限包含重新編譯。那次 `go test` 讀到快取（CRAP 或前一個套件剛跑過）時只花零點幾秒，時限只剩幾秒，改壞的版本重新編譯就超時，連測試全過的也被算成逾時（算抓到），抓錯率虛高；被越多套件引用的套件、`module` 模式、worker 越多越明顯。代價：每個改壞的版本都重跑沒受影響套件的測試，真的卡住的改壞版本要等到「30 × 實際測試時間」才判定逾時。使用者在 GOFLAGS 寫的 `-count` 會被蓋成 1。
 - **`module` 時，`go test ./...` 會跑模組裡所有套件的測試**，包括 `exclude` 底下但仍屬於同一個模組的套件（有自己 `go.mod` 的子目錄不算）。這些測試沒過，抓錯檢查會以結束碼 2 停下。
 - 拿 v2.2.0 以前的現況報告跟 `module` 的新報告比較時，`compare` 會多一行「抓錯檢查的範圍不同」：那之前的抓錯檢查一律只跑同套件的測試。
 - **gremlins 每個 worker 開工前，會把 go.mod 所在的目錄（通常是 repo 根目錄）整個複製一份到系統暫存資料夾**，包括 `node_modules`、`.git` 這類目錄。這個目錄很大時，抓錯檢查的時間和硬碟用量主要花在這裡；`mutation.workers` 設小一點可以少複製幾份。

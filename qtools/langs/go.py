@@ -76,6 +76,22 @@ def gremlins_args(settings, d, out, subdirs=(), skip_files=(), coverpkg=None):
     return args
 
 
+def gremlins_env(environ, goflags):
+    """執行 gremlins 用的環境變數：GOFLAGS 在目前生效的值後面接 -count=1，不讀測試快取。
+
+    gremlins 先跑一次 go test 量覆蓋率，用花的時間 × --timeout-coefficient 當每個改壞版本的時限，
+    時限涵蓋整個 go test 指令，包含重新編譯。CRAP 或前一個套件剛跑過同樣的測試時，那次 go test 讀快取，
+    只花零點幾秒，時限跟著只剩幾秒；改壞的版本要重新編譯，被引用越多的套件要重編越多，同時跑好幾個時大量超時，
+    其中有測試全過的也被算成逾時（算抓到）。不讀快取後，時限依實際跑測試的時間計算。
+
+    goflags 傳 go env GOFLAGS 的結果：環境變數會蓋掉 go env -w 寫進設定檔的 GOFLAGS，只看 environ 會弄丟設定檔的旗標。
+    原字串不拆開，引號裡的空白照舊；GOFLAGS 裡同一個旗標以後面的為準，使用者寫了 -count 也一律改成 1。
+    """
+    env = dict(environ)
+    env["GOFLAGS"] = (goflags.strip() + " -count=1").strip()
+    return env
+
+
 def skip_pattern(name):
     """比對整個檔名的 Go 正規表示式。ASCII 英數和 _ 以外的字元都寫成 \\x{碼位}，不用處理哪些字元要跳脫。
 
@@ -201,6 +217,10 @@ class Go(Language):
             coverpkg = ",".join(p for p, _ in (pkgs or _packages(cfg, _module())))
             print("抓錯檢查：整個模組的測試都算（go.coverage_scope = module），每個改壞的版本跑整個模組的測試",
                   file=sys.stderr, flush=True)
+        r = run(["go", "env", "GOFLAGS"])
+        if r.returncode != 0:
+            raise QualityError("go env GOFLAGS 執行失敗：\n" + r.stderr)
+        goflags = r.stdout
         mutants = []
         for d in dirs:
             if not os.path.isdir(d):  # 整個目錄被刪掉
@@ -212,7 +232,8 @@ class Go(Language):
                       file=sys.stderr, flush=True)
             with tempfile.TemporaryDirectory() as tmp:
                 out = os.path.join(tmp, "gremlins.json")
-                r = run(["go", "run", GREMLINS] + gremlins_args(settings, d, out, _subdirs(d), skip, coverpkg))
+                r = run(["go", "run", GREMLINS] + gremlins_args(settings, d, out, _subdirs(d), skip, coverpkg),
+                        env=gremlins_env(os.environ, goflags))
                 if os.path.exists(out):
                     with open(out, encoding="utf-8") as f:
                         result = json.load(f)

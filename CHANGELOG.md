@@ -2,6 +2,14 @@
 
 每一版寫三件事：改了什麼、原本通過的專案會不會變成沒過、專案 repo 要不要跟著改設定。版本號的規則見 README 的「改版流程」。
 
+## v2.3.0
+
+- Go 的抓錯檢查執行 gremlins 時，GOFLAGS 在 `go env GOFLAGS` 的值後面加 `-count=1`，不讀測試快取。gremlins 用第一次 `go test` 的時間 × `--timeout-coefficient`（30）當每個改壞版本的時限，時限包含重新編譯。CRAP 或前一個套件剛跑過同樣的測試時，那次 `go test` 讀快取，只花零點幾秒，時限只剩幾秒；改壞的版本要重新編譯，被越多套件引用的套件要重編越多，同時跑好幾個時大量超時，測試全過的改壞版本也被算成逾時（算抓到）。實測一個 `go.coverage_scope = "module"`、12 核心機器上跑的專案：逾時從 340 個變成 3 個，其中 67 個實際是沒抓到；整體抓錯率 93.98% → 88.31%，資料存取層的套件 100% → 91.44%，一個套件從 86.67% 變成 77.78%，低於門檻 80。`baseline` 從 18 分鐘變成 30 分鐘。
+- 用 `go env GOFLAGS` 取得生效中的值，`go env -w` 寫進設定檔的旗標（例如 `-tags`、`-mod`）照樣帶給 gremlins。GOFLAGS 裡原本寫的 `-count` 會被蓋成 1。
+- selftest 的 Go 範例在 macOS 上可以跑：兩個情境原本用 GNU 寫法的 `sed -i`，BSD sed 會把下一個參數當成備份副檔名而失敗，改成寫到暫存檔再 `mv`。`dev/unit_checks.py` 檢查 `selftest/*.json` 不再出現 `sed -i`。
+
+原本通過的專案可能變成沒過：原本被算成逾時的改壞版本，有一部分會變成沒抓到，Go 的抓錯率可能下降；`package` 和 `module` 都受影響，`module`、worker 多、套件被很多套件引用時差最多。真的卡住的改壞版本要等「30 × 實際測試時間」才判定逾時，抓錯檢查和 `baseline` 會變慢。C#、JS、Python 不變。`.quality.json` 不用改。用 reusable workflow 的專案，`uses:` 和 `tools-ref` 一起改成 `v2.3.0`。拿 v2.2.0 以前的 Go 現況報告跟新報告比較時，抓錯率的下降有一部分來自量法修正，不代表測試變差。
+
 ## v2.2.0
 
 - `go.coverage_scope = "module"` 也套用到 Go 的抓錯檢查（`mutation`、`check` 的第三關、`baseline`）：gremlins 加上 `--integration --coverpkg <沒被 exclude 排除的套件>`，覆蓋率和每個改壞的版本都跑整個模組的測試。v2.1.0 時這個設定只影響 CRAP，同一行程式在 CRAP 算有測到、在抓錯檢查算「測試沒跑到」。實測一個以整合測試為主的套件，測到率從 13.4% 變成 94.6%，抓錯率 82.2% → 83.3%，沒抓到的改壞版本從 8 個變成 53 個，新增的 45 個原本被歸成「測試沒跑到」。
