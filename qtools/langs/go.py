@@ -54,15 +54,19 @@ def gremlins_describe(mutator, line, column):
     return None, None
 
 
-def gremlins_args(settings, d, out, subdirs=(), skip_files=()):
+def gremlins_args(settings, d, out, subdirs=(), skip_files=(), coverpkg=None):
     """gremlins unleash 的命令列參數。settings 是 Language.settings 的結果，沒設的項目不傳（維持 v1 行為）。
 
-    skip_files 是套件目錄底下不產生改壞版本的檔名。
+    skip_files 是套件目錄底下不產生改壞版本的檔名。coverpkg 給了（go.coverage_scope = module）就用
+    --integration 加 --coverpkg：覆蓋率和每個改壞的版本都跑整個模組的測試。只加 --integration 不夠，
+    gremlins 量覆蓋率時沒有 --coverpkg 就只記錄同套件的程式碼，其他套件的測試跑到的行仍算沒跑到。
     """
     args = ["unleash", "./" + d,
             "--timeout-coefficient", TIMEOUT_COEFFICIENT,
             "--invert-logical",  # 預設關閉的 && ↔ || 互換
             "-o", out]
+    if coverpkg:
+        args += ["--integration", "--coverpkg", coverpkg]
     if settings["workers"] is not None:
         args += ["--workers", str(settings["workers"])]
     for sub in subdirs:
@@ -181,12 +185,22 @@ class Go(Language):
     def measure_mutants(self, cfg, dirs=None, files=None):
         # 有 files（--base）時，套件裡沒改到的檔案用 -E 排除，不產生改壞的版本；只算改到的行仍由核心過濾。
         # 不用 gremlins 的 --diff：一段 diff 裡有兩處分開的修改時，它只算到第一處
+        pkgs = None
         if dirs is None:
-            dirs = [d for _, d in _packages(cfg, _module())]
+            pkgs = _packages(cfg, _module())
+            dirs = [d for _, d in pkgs]
 
         settings = self.settings(cfg)
         for w in self.unsupported_warnings(settings):
             print(w, file=sys.stderr, flush=True)
+        scope = cfg["go"]["coverage_scope"]
+        self.tools["mutation_scope"] = scope
+        coverpkg = None
+        if scope == "module":
+            # 跟 CRAP 用同一份套件清單（已排除 exclude），不用 ./... 樣式
+            coverpkg = ",".join(p for p, _ in (pkgs or _packages(cfg, _module())))
+            print("抓錯檢查：整個模組的測試都算（go.coverage_scope = module），每個改壞的版本跑整個模組的測試",
+                  file=sys.stderr, flush=True)
         mutants = []
         for d in dirs:
             if not os.path.isdir(d):  # 整個目錄被刪掉
@@ -198,7 +212,7 @@ class Go(Language):
                       file=sys.stderr, flush=True)
             with tempfile.TemporaryDirectory() as tmp:
                 out = os.path.join(tmp, "gremlins.json")
-                r = run(["go", "run", GREMLINS] + gremlins_args(settings, d, out, _subdirs(d), skip))
+                r = run(["go", "run", GREMLINS] + gremlins_args(settings, d, out, _subdirs(d), skip, coverpkg))
                 if os.path.exists(out):
                     with open(out, encoding="utf-8") as f:
                         result = json.load(f)

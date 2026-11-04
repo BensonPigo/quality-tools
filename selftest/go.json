@@ -138,6 +138,150 @@
       ]
     },
     {
+      "name": "go.coverage_scope = module 的抓錯檢查：改 Weight 的條件，別的套件的測試會跑到改壞的版本，測到率 100%",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if kg > 20 {",
+          "new": "if kg > 21 {"
+        },
+        {
+          "file": "crossuse/doc.go",
+          "content": "// Package crossuse 只放從別的套件測 shipping 的測試。\npackage crossuse\n"
+        },
+        {
+          "file": "crossuse/weight_test.go",
+          "content": "package crossuse\n\nimport (\n\t\"testing\"\n\n\t\"shop/shipping\"\n)\n\n// 從別的套件測 shipping.Weight：只有 go.coverage_scope = module 時才算進 Weight 的覆蓋率。\nfunc TestWeightFromOtherPackage(t *testing.T) {\n\tif shipping.Weight(25) != 200 || shipping.Weight(15) != 100 || shipping.Weight(1) != 0 {\n\t\tt.Fatal(\"Weight\")\n\t}\n}\n"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"crap\": {",
+          "new": "\"go\": {\"coverage_scope\": \"module\"},\n  \"crap\": {"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"reach_rate_threshold\": 0",
+          "new": "\"reach_rate_threshold\": 50"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main",
+        "--json",
+        "out-mut.json"
+      ],
+      "exit": 0,
+      "contains": [
+        "抓錯檢查：整個模組的測試都算（go.coverage_scope = module），每個改壞的版本跑整個模組的測試",
+        "PASS"
+      ],
+      "json": "out-mut.json",
+      "json_values": {
+        "tools.mutation_scope": "module",
+        "mutation.counts.NOT_COVERED": 0,
+        "mutation.counts.KILLED": 1,
+        "mutation.counts.LIVED": 1
+      }
+    },
+    {
+      "name": "同上但沒設 go.coverage_scope：抓錯檢查只跑 shipping 自己的測試，改壞的版本都是測試沒跑到，測到率 0%",
+      "edits": [
+        {
+          "file": "shipping/fee.go",
+          "old": "if kg > 20 {",
+          "new": "if kg > 21 {"
+        },
+        {
+          "file": "crossuse/doc.go",
+          "content": "// Package crossuse 只放從別的套件測 shipping 的測試。\npackage crossuse\n"
+        },
+        {
+          "file": "crossuse/weight_test.go",
+          "content": "package crossuse\n\nimport (\n\t\"testing\"\n\n\t\"shop/shipping\"\n)\n\n// 從別的套件測 shipping.Weight：只有 go.coverage_scope = module 時才算進 Weight 的覆蓋率。\nfunc TestWeightFromOtherPackage(t *testing.T) {\n\tif shipping.Weight(25) != 200 || shipping.Weight(15) != 100 || shipping.Weight(1) != 0 {\n\t\tt.Fatal(\"Weight\")\n\t}\n}\n"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"kill_rate_threshold\": 80",
+          "new": "\"kill_rate_threshold\": 0"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"reach_rate_threshold\": 0",
+          "new": "\"reach_rate_threshold\": 50"
+        }
+      ],
+      "run": [
+        "mutation",
+        "--base",
+        "main",
+        "--json",
+        "out-mut.json"
+      ],
+      "exit": 1,
+      "contains": [
+        "測到率：0.00%"
+      ],
+      "not_contains": [
+        "抓錯檢查：整個模組的測試都算"
+      ],
+      "json": "out-mut.json",
+      "json_values": {
+        "tools.mutation_scope": "package",
+        "mutation.counts.KILLED": 0
+      }
+    },
+    {
+      "name": "go.coverage_scope = module 的 baseline：JSON 記錄兩個範圍，現況報告寫明抓錯檢查跑整個模組的測試",
+      "edits": [
+        {
+          "file": "crossuse/doc.go",
+          "content": "// Package crossuse 只放從別的套件測 shipping 的測試。\npackage crossuse\n"
+        },
+        {
+          "file": "crossuse/weight_test.go",
+          "content": "package crossuse\n\nimport (\n\t\"testing\"\n\n\t\"shop/shipping\"\n)\n\n// 從別的套件測 shipping.Weight：只有 go.coverage_scope = module 時才算進 Weight 的覆蓋率。\nfunc TestWeightFromOtherPackage(t *testing.T) {\n\tif shipping.Weight(25) != 200 || shipping.Weight(15) != 100 || shipping.Weight(1) != 0 {\n\t\tt.Fatal(\"Weight\")\n\t}\n}\n"
+        },
+        {
+          "file": ".quality.json",
+          "old": "\"crap\": {",
+          "new": "\"go\": {\"coverage_scope\": \"module\"},\n  \"crap\": {"
+        }
+      ],
+      "steps": [
+        {
+          "run": [
+            "baseline",
+            "--out",
+            "docs/q.md"
+          ],
+          "exit": 0,
+          "json": "docs/q.json",
+          "json_values": {
+            "tools.coverage_scope": "module",
+            "tools.mutation_scope": "module"
+          }
+        },
+        {
+          "shell": [
+            "{bash}",
+            "-c",
+            "cat docs/q.md"
+          ],
+          "exit": 0,
+          "contains": [
+            "每個改壞的版本跑整個模組的測試（go.coverage_scope = module，gremlins --integration --coverpkg）",
+            "覆蓋率算整個模組的測試"
+          ]
+        }
+      ]
+    },
+    {
       "name": "只改函式外面的註解：不算改到函式",
       "edits": [
         {

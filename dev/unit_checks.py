@@ -468,6 +468,14 @@ class SettingsChecks(unittest.TestCase):
         args = go.gremlins_args(null, "shipping", "out.json", ["sub.d"], ["ee.go", "rate_v2.go"])
         self.assertEqual(args, without + ["-E", "^ee\\x{2E}go$", "-E", "^rate_v2\\x{2E}go$"])
 
+    def test_go_args_coverpkg(self):
+        null = go.LANGUAGE().settings(self.cfg())
+        without = go.gremlins_args(null, "shipping", "out.json", ["sub.d"], ["ee.go"])
+        self.assertEqual(go.gremlins_args(null, "shipping", "out.json", ["sub.d"], ["ee.go"], None), without)
+        args = go.gremlins_args(null, "shipping", "out.json", ["sub.d"], ["ee.go"], "shop,shop/shipping")
+        self.assertEqual(args, without[:7] + ["--integration", "--coverpkg", "shop,shop/shipping"] + without[7:])
+        self.assertIn("^ee\\x{2E}go$", args)
+
     def test_go_skip_pattern_escapes_by_code_point(self):
         self.assertEqual(go.skip_pattern("fee.go"), "^fee\\x{2E}go$")
         self.assertEqual(go.skip_pattern("a-b+c.go"), "^a\\x{2D}b\\x{2B}c\\x{2E}go$")
@@ -857,6 +865,25 @@ class CompareChecks(unittest.TestCase):
         new = _baseline_report(pkgs=[("p", 50.0, 80.0)])
         old["language"] = new["language"] = "python"
         self.assertNotIn("覆蓋率範圍不同", "\n".join(baseline.compare_lines(old, new)))
+        self.assertNotIn("抓錯檢查的範圍不同", "\n".join(baseline.compare_lines(old, new)))
+
+    def test_mutation_scope_change_from_v210_module_report(self):
+        old = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        old["tools"]["coverage_scope"] = "module"  # v2.1.0 的 module：抓錯檢查仍分套件，沒有 mutation_scope
+        new = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        new["tools"].update(coverage_scope="module", mutation_scope="module")
+        text = "\n".join(baseline.compare_lines(old, new))
+        self.assertIn("抓錯檢查的範圍不同（package → module），抓錯率和測到率的變化主要來自量法改變", text)
+        self.assertNotIn("覆蓋率範圍不同", text)
+        self.assertEqual(report_schema.validate(new), [])
+
+    def test_same_mutation_scope_has_no_line(self):
+        old = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        new = _baseline_report(pkgs=[("p", 50.0, 80.0)])
+        for r in (old, new):
+            r["tools"].update(coverage_scope="module", mutation_scope="module")
+        text = "\n".join(baseline.compare_lines(old, new))
+        self.assertNotIn("範圍不同", text)
 
     def test_helper_reports_pass_schema(self):
         self.assertEqual(report_schema.validate(_baseline_report(pkgs=[("p", 50.0, 80.0)])), [])
