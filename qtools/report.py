@@ -57,8 +57,8 @@ def print_mutation_result(mutants, counts, cfg, settings, unused=()):
     """列出沒抓到和測試沒跑到的改壞版本，加上計數、抓錯率、測到率、這次用的設定、排除清單沒用到的項目。"""
     for m in sorted(mutants, key=lambda m: (m.file, m.line)):
         if m.status in (LIVED, NOT_COVERED):
-            print("{}  {}:{}  {}  ｜ {}".format(
-                STATUS_NAMES[m.status].split("（")[0], m.file, m.line, mutation.describe(m), m.line_text))
+            print("{}  {}  {}  ｜ {}".format(
+                STATUS_NAMES[m.status].split("（")[0], location(m), mutation.describe(m), m.line_text))
 
     k = cfg["mutation"]["kill_rate_threshold"]
     r = cfg["mutation"]["reach_rate_threshold"]
@@ -75,7 +75,15 @@ def print_mutation_result(mutants, counts, cfg, settings, unused=()):
         print()
         print("排除清單有 {} 項沒用到（那一行的原文或改法已經變了，請重新判斷，或從清單刪掉）：".format(len(unused)))
         for e in unused:
-            print("  {}  {}  {}".format(e["file"], e["mutator"], e["line_text"]))
+            column = "  欄 {}".format(e["column"]) if "column" in e else ""
+            print("  {}  {}  {}{}".format(e["file"], e["mutator"], e["line_text"], column))
+
+
+def location(m):
+    """「檔案:行:欄」，量測工具沒回報欄位時是「檔案:行」。排除清單的 column 就照這裡的欄抄。"""
+    if m.column is None:
+        return "{}:{}".format(m.file, m.line)
+    return "{}:{}:{}".format(m.file, m.line, m.column)
 
 
 def settings_line(settings):

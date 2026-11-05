@@ -2,7 +2,8 @@
 
 清單放在各 repo 的 .quality-equivalents.json，由人判斷後寫入，格式見 docs。比對鍵是
 file + mutator + 該行去頭尾空白後的原文，不用行號：前面插幾行也還對得上；那一行被改了就失效，
-要人重新判斷，這是刻意的。function 只用來顯示和人工檢查，不參與比對。
+要人重新判斷，這是刻意的。選填的 column 只排除那一欄的改壞版本（同一行同一種改法有好幾個時用），
+值照量測工具回報的欄位（含縮排），縮排一變就對不上，一樣要人重新判斷。function 只用來顯示和人工檢查，不參與比對。
 """
 
 import json
@@ -12,7 +13,7 @@ from qtools.model import EQUIVALENT, EXCLUDED_MUTATOR
 from qtools.proc import QualityError, normalize
 
 REQUIRED = ("file", "mutator", "line_text", "reason", "approved_by")
-OPTIONAL = ("function",)
+OPTIONAL = ("function", "column")
 
 
 def load(path):
@@ -45,9 +46,15 @@ def validate(data, path=".quality-equivalents.json"):
                 problems.append("第 {} 項的 {} 必須是非空白的字串".format(i, key))
         if "function" in item and not isinstance(item["function"], str):
             problems.append("第 {} 項的 function 必須是字串".format(i))
+        if "column" in item and not _positive_int(item["column"]):
+            problems.append("第 {} 項的 column 必須是正整數".format(i))
     if problems:
         raise QualityError("{} 有誤：\n  ".format(path) + "\n  ".join(problems))
     return data
+
+
+def _positive_int(v):
+    return isinstance(v, int) and not isinstance(v, bool) and v > 0
 
 
 def _key(file, mutator, line_text):
@@ -65,17 +72,23 @@ def apply(mutants, entries, universe=None, scope=None):
     """
     universe = mutants if universe is None else universe
     wanted = {}
-    for e in entries:
-        wanted.setdefault(_key(e["file"], e["mutator"], e["line_text"]), []).append(e)
+    for i, e in enumerate(entries):
+        wanted.setdefault(_key(e["file"], e["mutator"], e["line_text"]), []).append(i)
     in_scope = None if scope is None else {normalize(f) for f in scope}
+
+    def matches(m):
+        """對得上這個改壞版本的項目編號。沒有 column 的項目對整行；有 column 的只對那一欄。"""
+        if m.status == EXCLUDED_MUTATOR:
+            return []
+        ids = wanted.get(_key(m.file, m.mutator, m.line_text), [])
+        return [i for i in ids if "column" not in entries[i] or entries[i]["column"] == m.column]
 
     used = set()
     for m in universe:
-        if m.status != EXCLUDED_MUTATOR and _key(m.file, m.mutator, m.line_text) in wanted:
-            used.add(_key(m.file, m.mutator, m.line_text))
+        used.update(matches(m))
     for m in mutants:
-        if m.status != EXCLUDED_MUTATOR and _key(m.file, m.mutator, m.line_text) in wanted:
+        if matches(m):
             m.status = EQUIVALENT
 
-    return [e for e in entries
-            if (in_scope is None or normalize(e["file"]) in in_scope) and _key(e["file"], e["mutator"], e["line_text"]) not in used]
+    return [e for i, e in enumerate(entries)
+            if (in_scope is None or normalize(e["file"]) in in_scope) and i not in used]

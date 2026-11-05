@@ -372,7 +372,7 @@ class EquivalentChecks(unittest.TestCase):
         self.assertEqual(equivalents.load(os.path.join(tempfile.gettempdir(), "no-such-qe.json")), [])
 
     def test_valid_entries_load_as_is(self):
-        entries = [_entry(), _entry(function="Fee", line_text="x")]
+        entries = [_entry(), _entry(function="Fee", line_text="x"), _entry(column=1)]
         self.assertEqual(self.load_text(json.dumps(entries)), entries)
 
     def test_invalid_entries_exit_2_and_name_the_item(self):
@@ -383,6 +383,11 @@ class EquivalentChecks(unittest.TestCase):
             (json.dumps([_entry(), no_reason]), "第 2 項缺少必填欄位 reason"),
             (json.dumps([_entry(approved_by="")]), "第 1 項的 approved_by"),
             (json.dumps([_entry(), _entry(extra=1)]), "第 2 項有不認得的鍵：extra"),
+            (json.dumps([_entry(column=0)]), "第 1 項的 column 必須是正整數"),
+            (json.dumps([_entry(column=-1)]), "第 1 項的 column 必須是正整數"),
+            (json.dumps([_entry(column="3")]), "第 1 項的 column 必須是正整數"),
+            (json.dumps([_entry(column=True)]), "第 1 項的 column 必須是正整數"),
+            (json.dumps([_entry(column=1.5)]), "第 1 項的 column 必須是正整數"),
             ('{"file": "a.go"}', "最外層必須是陣列"),
             ("[{", "不是合法的 JSON"),
         ]
@@ -402,6 +407,31 @@ class EquivalentChecks(unittest.TestCase):
         unused = equivalents.apply(mutants, [_entry(line_text="  if total >= 1000 {\t")])
         self.assertEqual([m.status for m in mutants], ["EQUIVALENT", "LIVED", "LIVED", "LIVED", "EQUIVALENT"])
         self.assertEqual(unused, [])
+
+    def test_column_matches_only_that_column(self):
+        def pair():
+            return [_mutant(column=18), _mutant(column=31)]
+        # 有 column：只排除那一欄，另一欄維持原狀態
+        ms = pair()
+        self.assertEqual(equivalents.apply(ms, [_entry(column=18)]), [])
+        self.assertEqual([m.status for m in ms], ["EQUIVALENT", "LIVED"])
+        # 沒有 column：整行都排除（v2.3.1 的行為）
+        ms = pair()
+        self.assertEqual(equivalents.apply(ms, [_entry()]), [])
+        self.assertEqual([m.status for m in ms], ["EQUIVALENT", "EQUIVALENT"])
+        # 欄位寫錯：都不排除，這一項沒用到
+        ms = pair()
+        wrong = _entry(column=99)
+        self.assertEqual(equivalents.apply(ms, [wrong]), [wrong])
+        self.assertEqual([m.status for m in ms], ["LIVED", "LIVED"])
+        # 三個鍵相同、column 不同的兩項，各自判斷有沒有用到
+        ms = pair()
+        right, wrong = _entry(column=18), _entry(column=99)
+        self.assertEqual(equivalents.apply(ms, [right, wrong]), [wrong])
+        # 量測工具沒回報欄位時，有 column 的項目對不上
+        m = _mutant()
+        self.assertEqual(equivalents.apply([m], [_entry(column=5)]), [_entry(column=5)])
+        self.assertEqual(m.status, "LIVED")
 
     def test_file_path_is_normalized(self):
         for written in ("./a.go", "a.go", ".\\a.go"):
@@ -757,6 +787,18 @@ class DescribeChecks(unittest.TestCase):
         lines = out.getvalue().splitlines()
         self.assertEqual(lines[0], "沒抓到  a.go:5  把 `>=` 改成 `>`  ｜ if total >= 1000 {")
         self.assertEqual(lines[1], "測試沒跑到  a.go:9  改法 CONDITIONALS_BOUNDARY  ｜ return 60")
+
+    def test_mutation_text_shows_column_when_known(self):
+        cfg = config.validate({"version": 2, "language": "go"})
+        mutants = [_mutant(column=9, original=">=", replacement=">")]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            report.print_mutation_result(mutants, mutation.count(mutants), cfg, go.LANGUAGE().settings(cfg),
+                                         [_entry(column=31), _entry(line_text="x")])
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[0], "沒抓到  a.go:5:9  把 `>=` 改成 `>`  ｜ if total >= 1000 {")
+        self.assertIn("  a.go  CONDITIONALS_BOUNDARY  if total >= 1000 {  欄 31", lines)
+        self.assertIn("  a.go  CONDITIONALS_BOUNDARY  x", lines)
         self.assertIn("設定：逾時 工具預設、同時跑 工具預設、排除改法 無", lines)
 
     def test_excluded_and_unused_are_printed(self):

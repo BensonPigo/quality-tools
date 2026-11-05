@@ -196,12 +196,14 @@ python tools/quality/quality.py baseline --compare docs/品質現況.json
 沒抓到的改壞版本，輸出會寫出位置和改了什麼，例如：
 
 ```
-沒抓到  shipping/fee.go:5  把 `>=` 改成 `>`  ｜ if total >= 1000 {
+沒抓到  shipping/fee.go:5:11  把 `>=` 改成 `>`  ｜ if total >= 1000 {
 ```
+
+位置是「檔案:行:欄」；量測工具沒回報欄位時只有「檔案:行」。
 
 這個邊界值沒有測到，補測試就能抓到。
 
-**處理改了也沒差的版本**：有些改壞版本不管怎麼改，程式的結果都一樣，不可能抓到。AI 不准為它寫奇怪的測試，也不准自己編輯 `.quality-equivalents.json`，要在回報裡列出檔案、行號、改法、那一行的原文和理由。人確認後，把這一項加進 `.quality-equivalents.json`：
+**處理改了也沒差的版本**：有些改壞版本不管怎麼改，程式的結果都一樣，不可能抓到。AI 不准為它寫奇怪的測試，也不准自己編輯 `.quality-equivalents.json`，要在回報裡列出檔案、行號、欄、改法、那一行的原文和理由。人確認後，把這一項加進 `.quality-equivalents.json`：
 
 ```json
 [
@@ -216,7 +218,9 @@ python tools/quality/quality.py baseline --compare docs/品質現況.json
 ]
 ```
 
-`reason` 和 `approved_by` 必填，缺了指令以結束碼 2 結束。比對用 `file`、`mutator` 和那一行去頭尾空白後的原文，不用行號；那一行被改了，這一項就失效，要重新判斷。清單裡沒用到的項目會在輸出列成「排除清單有 N 項沒用到」，可以刪掉。`mutator` 的名稱看 `mutation --json 檔名` 寫出的報告裡 `mutation.mutants[].mutator`。這個檔案要由 CODEOWNERS 指定的人核准才能合併（步驟 6）。
+`reason` 和 `approved_by` 必填，缺了指令以結束碼 2 結束。比對用 `file`、`mutator` 和那一行去頭尾空白後的原文，不用行號；那一行被改了，這一項就失效，要重新判斷。清單裡沒用到的項目會在輸出列成「排除清單有 N 項沒用到」，可以刪掉。`mutator` 的名稱看 `mutation --json 檔名` 寫出的報告裡 `mutation.mutants[].mutator`。
+
+同一行、同一種改法有好幾個改壞版本，只有部分改了也沒差時，加上 `"column": 欄`（照輸出「檔案:行:欄」的欄抄），只排除那一欄；不加的話，整行同一種改法都會被排除，連真的缺口也看不到。細節見 `tools/quality/README.md` 的「排除清單」。這個檔案要由 CODEOWNERS 指定的人核准才能合併（步驟 6）。
 
 大專案的抓錯檢查在 CI 上可能很慢，改到大檔案或核心模組時要先跟團隊講好。要調整逾時或同時跑幾個，在 `.quality.json` 設 `mutation.timeout_seconds`、`mutation.workers`。
 
