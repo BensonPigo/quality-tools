@@ -1,5 +1,12 @@
 # quality-tools
 
+> **已廢棄，這個 repo 已封存（唯讀）。新專案請改用 [quality-referee](https://github.com/BensonPigo/quality-referee)。**
+>
+> - quality-referee 把工具拆成「裁判」和「檢查員」：判定規則（改到的範圍、CRAP、抓錯率、測到率、排除清單、報告）只有一套，量測交給各專案可以替換的檢查員。用同樣的設定量 Go 範例和 BeThere 時，分數和 quality-tools v2.4.0 一致。
+> - 三道關的教學和導入說明搬到 quality-referee 的 [`教材/`](https://github.com/BensonPigo/quality-referee/tree/main/教材)。
+> - 已經用 submodule 掛著 quality-tools 的專案照常能用：封存的 repo 仍然可以 clone，版本標籤都還在，只是不會再發新版或修 bug。最後一版是 v2.4.0。
+> - quality-referee 第一版只支援 Go，也沒有 `baseline`、`compare`。用 C#、JS/TS、Python 的專案，或需要現況報告的專案，換過去之前先看 quality-referee 的 README。
+
 三道檢查（單元測試、CRAP、抓錯檢查）的量測工具，目前是 v2.0.0。單元測試由各 repo 自己寫，這個工具負責量那些測試寫得夠不夠好：算 CRAP 分數、故意把程式改壞看測試抓不抓得到，並且只檢查這次改到的函式和行。
 
 這份文件寫給維護工具的人。專案 repo 要怎麼掛上這個工具，見 `docs/範本_三道防線/專案repo範本/README.md`。三道檢查為什麼這樣設計，見 `docs/導入步驟_三道檢查.md`。
