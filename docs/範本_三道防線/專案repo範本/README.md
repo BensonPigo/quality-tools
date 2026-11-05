@@ -243,7 +243,11 @@ python tools/quality/quality.py baseline --compare docs/品質現況.json
 
 三個地方一起設：
 
-1. **AI 工具的權限**：`.claude/settings.json` 的 `deny` 已經包含 `.quality.json`、`.quality-equivalents.json`、`.gitmodules`、`tools/quality/**`、`.gitea/**`、`.github/**`、`.claude/**`、`CODEOWNERS`。
+1. **AI 工具的權限**：`.claude/settings.json` 的 `deny` 已經包含 `.quality.json`、`.quality-equivalents.json`、`.gitmodules`、`tools/quality/**`、`.gitea/**`、`.github/**`、`.claude/**`、`CODEOWNERS`。這一層只是第一道提醒，有兩個漏洞：
+   - `Edit(...)` 只擋 Claude Code 的編輯工具。AI 用 Bash 的 `sed`、重新導向寫檔，一樣改得到這些檔案。
+   - 規則寫在專案 repo 的 `.claude/settings.json`，只有在這個 repo 開的 Claude Code 對話才讀得到。在別的目錄開對話、再用路徑改這個 repo 的檔案時，規則不生效。
+
+   所以真正擋得住的是第 2、3 項：改到這些檔案的 PR 要指定的人核准才能合併。
 2. **CODEOWNERS**：把 `CODEOWNERS` 放到 `.gitea/CODEOWNERS`（GitHub 放 `.github/CODEOWNERS`），把裡面的 `@your-org/quality-reviewers` 換成實際的審核群組。改到這些檔案的 PR 要他們核准。Gitea 的 CODEOWNERS 比對規則和 GitHub 不完全相同，貼進去之後對照你們 Gitea 版本的說明確認，範本沒有在 Gitea 上測過。
 3. **分支保護**：見下方「設定 Gitea」。
 
@@ -361,10 +365,10 @@ find 目標repo/tools/quality -name __pycache__ -prune -exec rm -rf {} +
 
 | 項目 | 狀態 |
 |---|---|
-| quality-tools 本身 | `selftest.py` 五個範例和 `dev/v1_parity.py check`（分數跟 v1.0.0 一致）在本機 Windows 通過。v2 的程式沒有在 Linux 上跑過 |
-| `gate.sh` | 在 `selftest.py` 的 Go 範例用模擬的輸入驗證過：沒改東西時放行；改舊函式、測試失敗都會擋下；沒抓 submodule 又有改東西時，擋下並提示執行 `git submodule update --init`；找不到比較基準時放行，`QUALITY_BASE` 能覆蓋。還沒接上真的 Claude Code 對話測試，步驟 5 就是在測這個 |
-| `.claude/settings.json` 的禁止規則 | 語法照 Claude Code 官方文件寫，還沒實測，步驟 5 會測到 |
-| 範本的四個語言 workflow 和 `reusable-caller.yml` | 用 actionlint v1.7.7 檢查語法沒有錯誤。還沒在 Gitea 或 GitHub 的 runner 上實際跑過 |
+| quality-tools 本身 | `selftest.py` 五個範例：每個 PR 和推到 main 時在 GitHub Actions 的 Linux runner（`ubuntu-latest`）跑；本機 Windows 和 macOS 也通過。`dev/v1_parity.py check`（分數跟 v1.0.0 一致）只在本機 Windows 跑 |
+| `gate.sh` | 在 `selftest.py` 的 Go 範例用模擬的輸入驗證過：沒改東西時放行；改舊函式、測試失敗都會擋下；沒抓 submodule 又有改東西時，擋下並提示執行 `git submodule update --init`；找不到比較基準時放行，`QUALITY_BASE` 能覆蓋。試點的 Go 專案（v2.0.1）在真的 Claude Code 對話裡測過：AI 留下失敗的測試想結束時被擋下，改回程式後放行。其他語言還沒在真的對話裡測過 |
+| `.claude/settings.json` 的禁止規則 | 語法照 Claude Code 官方文件寫，試點專案有設，但沒有實測過擋下編輯工具。擋不住 Bash 改檔、只在那個 repo 開的對話生效，見步驟 6 |
+| 範本的四個語言 workflow 和 `reusable-caller.yml` | 用 actionlint v1.7.7 檢查語法沒有錯誤。Go 的 workflow 原封不動用在試點專案，在 GitHub Actions 的 Linux runner 跑過三道檢查（v2.0.1～v2.3.1）。其他三個語言和 `reusable-caller.yml` 還沒在 runner 上跑過，Gitea 的 runner 也還沒跑過 |
 | reusable workflow | 還沒有在真的 runner 上跑過：`tools-ref` 與 `uses:` 版本相同、`tools-token` 讀私有 repo、submodule 版本比對，都沒有實測。Gitea 要什麼版本才能引用另一個 repo 的 reusable workflow，也沒有確認 |
-| submodule 接法 | v1.0.0 時在本機用 git 模擬過完整流程（遠端用本機的 bare repo 代替 Gitea）：發布版本 → `git submodule add` 相對網址 → `clone --recurse-submodules` → 三個指令結果正確 → 改舊函式時 `gate.sh` 擋下 → 升級、退回 → 設定 `submodule.recurse` 時切換分支工具跟著切。v2.0.0 沒有重做這個流程 |
+| submodule 接法 | v1.0.0 時在本機用 git 模擬過完整流程（遠端用本機的 bare repo 代替 Gitea）：發布版本 → `git submodule add` 相對網址 → `clone --recurse-submodules` → 三個指令結果正確 → 改舊函式時 `gate.sh` 擋下 → 升級、退回 → 設定 `submodule.recurse` 時切換分支工具跟著切。v2 在試點的 Go 專案（GitHub）用相對網址接上 v2.0.1，之後升級五次到 v2.3.1，CI 的 `submodules: true` 都抓得到工具。還沒在 Gitea 上接過 |
 | CODEOWNERS、分支保護 | 還沒在 Gitea 上跑過：CODEOWNERS 語法、受保護的檔案模式擋不擋得住 submodule 版本的變更，步驟 6、8 會測到 |
