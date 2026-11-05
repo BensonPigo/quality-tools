@@ -497,9 +497,9 @@ python dev/v1_parity.py record             # 重新用 v1.0.0 記錄（一般不
 
 | 項目 | 狀態 |
 |---|---|
-| `python selftest.py` | 在本機（Windows + Git Bash + Python 3.12、Go 1.27、.NET SDK 11 rc、Node 24）五個範例全部通過 |
+| `python selftest.py` | 五個範例全部通過：本機 Windows（Git Bash + Python 3.12、Go 1.27、.NET SDK 11 rc、Node 24）、本機 macOS（v2.3.0 起），以及每個 PR 和推到 main 時的 GitHub Actions（`selftest.yml`，ubuntu-latest） |
 | `python dev/v1_parity.py check` | 在本機（同上）五個範例通過：預設值下 CRAP 表每一列和抓到、沒抓到、測試沒跑到的數字跟 v1.0.0 一致 |
 | pip 安裝 | 在本機用新的 venv 執行 `pip install <repo 路徑>` 做過檢查。從遠端網址 `git+https://...@v2.0.0` 安裝沒有試過 |
 | reusable workflow `quality.yml` | 用 actionlint v1.7.7 檢查語法沒有錯誤。還沒在 GitHub 或 Gitea 的 runner 上實際跑過，`tools-ref`、`tools-token`、submodule 版本比對都沒有在真的 runner 上驗證 |
-| Linux | v2 的程式還沒在 Linux 上跑過。v1.0.0 時 `selftest.yml` 在 GitHub Actions（ubuntu-latest）通過；現在的 `selftest.yml` 還沒有在 GitHub Actions 上跑過 |
+| Linux | `selftest.yml` 在 GitHub Actions（ubuntu-latest）通過。試點的 Go 專案用範本的 Go workflow，在 ubuntu-latest 上跑過三道檢查。`dev/v1_parity.py check` 沒有在 Linux 上跑過 |
 | Gitea | 都沒有驗證：`selftest.yml`、reusable workflow、跨 repo 引用 `uses:`、CODEOWNERS 語法和受保護的檔案模式 |
